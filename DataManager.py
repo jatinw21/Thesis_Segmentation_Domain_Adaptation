@@ -5,6 +5,7 @@ from os.path import isfile, join, splitext
 import numpy as np
 import SimpleITK as sitk
 
+# What is isotropical scaling? https://stackoverflow.com/questions/43577231/what-is-anisotropic-scaling-in-computer-vision
 # dataset isotropically scaled to 1x1x1.5mm, volume resized to 128x128x64
 # The datasets were first normalised using the N4 bias filed correction function of the ANTs framework
 
@@ -24,14 +25,17 @@ class DataManager(object):
     def __init__(self,imageFolder, GTFolder, resultsDir, parameters):
         self.params = parameters
         self.imageFolder = imageFolder
+        # GT folder is the train label folder
         self.GTFolder = GTFolder
         self.resultsDir = resultsDir
 
     def createImageFileList(self):
+        '''Training images list'''
         self.imageFileList = [f for f in listdir(self.imageFolder) if isfile(join(self.imageFolder, f)) and '.DS_Store' not in f and '._' not in f and '.raw' not in f]
         print('imageFileList: ' + str(self.imageFileList))
 
     def createGTFileList(self):
+        '''Training images segmentation (labels) list'''
         self.GTFileList = [f for f in listdir(self.GTFolder) if isfile(
             join(self.GTFolder, f)) and '.DS_Store' not in f and '._' not in f and '.raw' not in f]
         print('GTFileList: ' + str(self.GTFileList))
@@ -46,8 +50,15 @@ class DataManager(object):
         m = 0.
 
         for f in self.imageFileList:
+            # the filename before extension is set as the id
             id = f.split('.')[0]
-            self.sitkImages[id]=rescalFilt.Execute(sitk.Cast(sitk.ReadImage(join(self.imageFolder, f)),sitk.sitkFloat32))
+            # https://simpleitk.readthedocs.io/en/master/Documentation/docs/source/IO.html
+            self.sitkImages[id]=rescalFilt.Execute(
+                sitk.Cast(
+                    sitk.ReadImage(join(self.imageFolder, f)),
+                    sitk.sitkFloat32
+                )
+            )
             stats.Execute(self.sitkImages[id])
             m += stats.GetMean()
 
@@ -58,8 +69,16 @@ class DataManager(object):
         self.sitkGT=dict()
 
         for f in self.GTFileList:
+            # the filename before extension is set as the id
             id = f.split('.')[0]
-            self.sitkGT[id]=sitk.Cast(sitk.ReadImage(join(self.GTFolder, f))>0.5,sitk.sitkFloat32)
+            self.sitkGT[id]=sitk.Cast(
+                sitk.ReadImage(
+                    join(self.GTFolder, f)
+                # Not sure exactly what is happening here. Maybe just taking darker than 05 pixels?
+                # Other pixels just 0
+                ) > 0.5,
+                sitk.sitkFloat32
+            )
 
     def loadTrainingData(self):
         self.createImageFileList()
@@ -78,7 +97,8 @@ class DataManager(object):
         self.loadImages()
 
     def getNumpyImages(self):
-        dat = self.getNumpyData(self.sitkImages,sitk.sitkLinear)
+        # http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/20_Expand_With_Interpolators.html
+        dat = self.getNumpyData(self.sitkImages, sitk.sitkLinear)
 
         for key in dat.keys(): # https://github.com/faustomilletari/VNet/blob/master/VNet.py, line 147. For standardization?
             mean = np.mean(dat[key][dat[key]>0]) # why restrict to >0? By Chao.
@@ -99,14 +119,20 @@ class DataManager(object):
         return dat
 
 
-    def getNumpyData(self,dat,method):
+    def getNumpyData(self, dat, method):
         ret=dict()
         for key in dat:
+            # VolSize --> default = [128, 128, 64]
             ret[key] = np.zeros([self.params['VolSize'][0], self.params['VolSize'][1], self.params['VolSize'][2]], dtype=np.float32)
 
             img=dat[key]
 
-            #we rotate the image according to its transformation using the direction and according to the final spacing we want
+            # we rotate the image according to its transformation using the direction and according to the final spacing we want
+            # dstRes --> default=[1, 1, 1.5]
+            # https://itk.org/Doxygen/html/classitk_1_1ImageBase.html#aaadef7c0a9627cf22b0fbf2de6de913c
+
+            # not sure how the factor thing exactly works - why we divide by dstRes --> what does that mean
+            # https://stackoverflow.com/questions/54895602/difference-between-image-resizing-and-space-changing
             factor = np.asarray(img.GetSpacing()) / [self.params['dstRes'][0], self.params['dstRes'][1],
                                                      self.params['dstRes'][2]]
 
@@ -116,9 +142,12 @@ class DataManager(object):
 
             newSize = newSize.astype(dtype='int')
 
+            # http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/21_Transforms_and_Resampling.html
             T=sitk.AffineTransform(3)
+            # from above link, setMatrix used in affine transformation
             T.SetMatrix(img.GetDirection())
 
+            # first resample the image and then crop it to get tregion of interest
             resampler = sitk.ResampleImageFilter()
             resampler.SetReferenceImage(img)
             resampler.SetOutputSpacing([self.params['dstRes'][0], self.params['dstRes'][1], self.params['dstRes'][2]])
@@ -129,11 +158,12 @@ class DataManager(object):
 
             imgResampled = resampler.Execute(img)
 
-
+            # taking the center part here
             imgCentroid = np.asarray(newSize, dtype=float) / 2.0
 
             imgStartPx = (imgCentroid - self.params['VolSize'] / 2.0).astype(dtype='int')
 
+            # https://itk.org/SimpleITKDoxygen/html/classitk_1_1simple_1_1RegionOfInterestImageFilter.html#details
             regionExtractor = sitk.RegionOfInterestImageFilter()
             size_2_set = self.params['VolSize'].astype(dtype='int')
             regionExtractor.SetSize(size_2_set.tolist())
