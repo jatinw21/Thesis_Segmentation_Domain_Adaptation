@@ -43,11 +43,16 @@ print('\n+preset parameters:\n' + str(params))
 parser = argparse.ArgumentParser()
 parser.add_argument('--numcontrolpoints', type=int, default=2) # for B-spline free-form deformation？？？ what are the method details? By Chao.
 parser.add_argument('--testProp', type=float, default=0.2) # if 'dirTestImage' or 'dirTestLabel' is empty, split 'dirTrainImage' and 'dirTrainLabel' into train and test
+# this is output spacing
 parser.add_argument('--dstRes', type=str, default='[1, 1, 1.5]')
+# this is output size
 parser.add_argument('--VolSize', type=str, default='[128, 128, 64]')
 
 parser.add_argument('--batchsize', type=int, default=2)
-parser.add_argument('--numIterations', type=int, default=1000) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
+
+# around 30,000 - 50,000 for actual dataset
+parser.add_argument('--numIterations', type=int, default=100) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
+
 parser.add_argument('--baseLR', type=float, default=0.0001) # the learning rate, initial one
 parser.add_argument('--momentum', type=float, default=0.99)
 parser.add_argument('--weight_decay', '--wd', default=1e-8, type=float,
