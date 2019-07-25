@@ -25,11 +25,13 @@ import DataManager as DM
 import customDataset
 # import make_graph
 
+
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv3d') != -1:
         nn.init.kaiming_normal_(m.weight)
         m.bias.data.zero_()
+
 
 def datestr():
     now = time.gmtime()
@@ -41,6 +43,7 @@ def save_checkpoint(state, path, prefix, filename='checkpoint.pth.tar'):
     name = prefix_save + '_' + filename
     torch.save(state, name)
 
+
 def train_test_split(images, labels, test_proportion):
     # images and labels are both dict().
     # pdb.set_trace()
@@ -48,29 +51,35 @@ def train_test_split(images, labels, test_proportion):
     size = len(keys)
     test_keys = sample(keys, int(test_proportion*size))
     test_images = {i: images[i] for i in keys if i in test_keys}
-    test_labels = {i+'_segmentation': labels[i+'_segmentation'] for i in keys if i in test_keys} # require customization
+    test_labels = {i+'_segmentation': labels[i+'_segmentation']
+                   for i in keys if i in test_keys}  # require customization
     train_images = {i: images[i] for i in keys if i not in test_keys}
-    train_labels = {i+'_segmentation': labels[i+'_segmentation'] for i in keys if i not in test_keys} # require customization
+    train_labels = {i+'_segmentation': labels[i+'_segmentation']
+                    for i in keys if i not in test_keys}  # require customization
     return train_images, train_labels, test_images, test_labels
+
 
 def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
-    nr_iter = args.numIterations # params['ModelParams']['numIterations']
-    batchsize = args.batchsize # params['ModelParams']['batchsize']
+    nr_iter = args.numIterations  # params['ModelParams']['numIterations']
+    batchsize = args.batchsize  # params['ModelParams']['batchsize']
 
     # pdb.set_trace()
     keysIMG = list(numpyImages.keys())
 
     nr_iter_dataAug = nr_iter*batchsize
     np.random.seed(1)
-    whichDataList = np.random.randint(len(keysIMG), size=int(nr_iter_dataAug/params['ModelParams']['nProc']))
+    whichDataList = np.random.randint(len(keysIMG), size=int(
+        nr_iter_dataAug/params['ModelParams']['nProc']))
     np.random.seed(11)
-    whichDataForMatchingList = np.random.randint(len(keysIMG), size=int(nr_iter_dataAug/params['ModelParams']['nProc']))
+    whichDataForMatchingList = np.random.randint(
+        len(keysIMG), size=int(nr_iter_dataAug/params['ModelParams']['nProc']))
 
-    for whichData,whichDataForMatching in zip(whichDataList,whichDataForMatchingList):
+    for whichData, whichDataForMatching in zip(whichDataList, whichDataForMatchingList):
 
         currImgKey = keysIMG[whichData]
-        currGtKey = keysIMG[whichData] + '_segmentation' # require customization. This is for PROMISE12 data.
+        # require customization. This is for PROMISE12 data.
+        currGtKey = keysIMG[whichData] + '_segmentation'
         # print("keysIMG type:{}\nkeysIMG:{}".format(type(keysIMG),str(keysIMG)))
         # print("whichData:{}".format(whichData))
         # pdb.set_trace()
@@ -83,12 +92,16 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
         defImg = numpyImages[currImgKey]
         defLab = numpyGT[currGtKey]
 
-        defImg = utils.hist_match(defImg, numpyImages[ImgKeyMatching]) # why do histogram matching for all images? By Chao.
+        # why do histogram matching for all images? By Chao.
+        defImg = utils.hist_match(defImg, numpyImages[ImgKeyMatching])
 
-        if(np.random.rand(1)[0]>0.5): #do not apply deformations always, just sometimes
-            defImg, defLab = utils.produceRandomlyDeformedImage(defImg, defLab, args.numcontrolpoints, params['ModelParams']['sigma'])
+        # do not apply deformations always, just sometimes
+        if(np.random.rand(1)[0] > 0.5):
+            defImg, defLab = utils.produceRandomlyDeformedImage(
+                defImg, defLab, args.numcontrolpoints, params['ModelParams']['sigma'])
 
         dataQueue.put(tuple((defImg, defLab)))
+
 
 def adjust_opt(optAlg, optimizer, iteration):
     if optAlg == 'sgd':
@@ -110,7 +123,8 @@ def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
     nProcessed = 0
     batch_size = len(trainLoader.dataset)
     for batch_idx, output in enumerate(trainLoader):
-        data, target = output # data shape [batch_size, channels, z, y, x], output shape [batch_size, z, y, x]
+        # data shape [batch_size, channels, z, y, x], output shape [batch_size, z, y, x]
+        data, target = output
         # pdb.set_trace()
         if args.cuda:
             data, target = data.cuda(), target.cuda()
@@ -119,18 +133,20 @@ def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
         target = Variable(target)
         # data, target = Variable(data), Variable(target)
         optimizer.zero_grad()
-        output = model(data) # output shape[batch_size, 2, z*y*x]
+        output = model(data)  # output shape[batch_size, 2, z*y*x]
         # print("data shape:{}\noutput shape:{}\ntarget shape:{}".format(data.shape, output.shape, target.shape))
         loss = lossFuncs.dice_loss(output, target)
         # make_graph.make_dot(os.path.join(resultDir, 'promise_net_graph.dot'), loss)
         loss.backward()
         optimizer.step()
         nProcessed += len(data)
-        diceOvBatch = loss.data[0]/batch_size # loss.data[0] is sum of dice coefficient over a mini-batch. By Chao.
+        # loss.data[0] is sum of dice coefficient over a mini-batch. By Chao.
+        diceOvBatch = loss.data[0]/batch_size
         err = 100.*(1. - diceOvBatch)
 
     if np.mod(iteration, 10) == 0:
-        print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(epoch, iteration, diceOvBatch, err))
+        print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
+            epoch, iteration, diceOvBatch, err))
 
     return diceOvBatch, err
 
@@ -164,16 +180,18 @@ def test_dice(dataManager, args, epoch, model, testLoader, testF, resultDir):
 
         # pdb.set_trace()
         _, _, z, y, x = data.shape  # need to squeeze to shape of 3-d. by Chao.
-        output = output[0,...] # assume batch_size = 1
+        output = output[0, ...]  # assume batch_size = 1
         _, output = output.max(0)
         output = output.view(z, y, x)
         output = output.cpu()
         # In numpy, an array is indexed in the opposite order (z,y,x)  while sitk will generate the sitk image in (x,y,z). (refer: http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/01_Image_Basics.html)
         output = output.numpy()
-        output = np.transpose(output, [2,1,0]) # change to simpleITK order (x, y, z)
+        # change to simpleITK order (x, y, z)
+        output = np.transpose(output, [2, 1, 0])
         # pdb.set_trace()
         print("save predicted label for test{}".format(id[0]))
-        dataManager.writeResultsFromNumpyLabel(output, id[0], '_tested_epoch{}'.format(epoch), '.mhd', resultDir) # require customization
+        dataManager.writeResultsFromNumpyLabel(output, id[0], '_tested_epoch{}'.format(
+            epoch), '.mhd', resultDir)  # require customization
         testF.write('{},{},{},{}\n'.format(epoch, id[0], dice, 1-dice))
 
     nTotal = len(testLoader)
@@ -181,6 +199,11 @@ def test_dice(dataManager, args, epoch, model, testLoader, testF, resultDir):
     err = 100.*incorrect/nTotal
     # if np.mod(iteration, 10) == 0:
     #     print('\nFor testing: iteration:{}\tAverage Dice Coeff: {:.4f}\tError:{:.4f}\n'.format(iteration, test_dice, err))
+
+    #### added later ##### - Jatin
+    print('\nFor testing: Average Dice Coeff: {:.4f}\tError:{:.4f}\n'.format(
+        test_dice, err))
+    #### added later #####
 
     # testF.write('{},{},{}\n'.format('avarage', test_dice, err))
     testF.flush()
@@ -202,28 +225,39 @@ def inference(dataManager, args, loader, model, resultDir):
         output = model(data)
 
         _, _, z, y, x = data.shape  # need to subset shape of 3-d. by Chao.
-        output = output[0,...] # assume batch_size=1
+        output = output[0, ...]  # assume batch_size=1
         _, output = output.max(0)
-        output = output.view(z, y, x) 
+        output = output.view(z, y, x)
         output = output.cpu()
         # In numpy, an array is indexed in the opposite order (z,y,x)  while sitk will generate the sitk image in (x,y,z). (refer: http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/01_Image_Basics.html)
         output = output.numpy()
-        output = np.transpose(output, [2,1,0]) # change to simpleITK order (x, y, z)
+        # change to simpleITK order (x, y, z)
+        output = np.transpose(output, [2, 1, 0])
         # pdb.set_trace()
         print("save predicted label for inference {}".format(id[0]))
-        dataManager.writeResultsFromNumpyLabel(output, id[0], '_inferred', '.mhd', resultDir) # require customization
+        dataManager.writeResultsFromNumpyLabel(
+            output, id[0], '_inferred', '.mhd', resultDir)  # require customization
 
 
 ## main method
 def main(params, args):
-    best_prec1 = 100. # accuracy? by Chao
+    # https://github.com/pytorch/examples/blob/master/imagenet/main.py#L139
+    # best_prec1 sort of can be seen here in above link as best_acc1.
+    # This is used to keep track of best_acc1 achieved yet in the checkpoints
+    best_prec1 = 100.  # accuracy? by Chao
     epochs = args.nEpochs
-    nr_iter = args.numIterations # params['ModelParams']['numIterations']
-    batch_size = args.batchsize # params['ModelParams']['batchsize']
-    resultDir = 'results/vnet.base.{}.{}'.format(params['ModelParams']['task'], datestr())
+    nr_iter = args.numIterations  # params['ModelParams']['numIterations']
+    batch_size = args.batchsize  # params['ModelParams']['batchsize']
+
+    # for every run, a folder is created and this is how it gets its name
+    resultDir = 'results/vnet.base.{}.{}'.format(
+        params['ModelParams']['task'], datestr())
 
     weight_decay = args.weight_decay
+    # https://pypi.org/project/setproctitle/
     setproctitle.setproctitle(resultDir)
+
+    # https://docs.python.org/3/library/shutil.html#shutil.rmtree
     if os.path.exists(resultDir):
         shutil.rmtree(resultDir)
     os.makedirs(resultDir, exist_ok=True)
@@ -241,6 +275,8 @@ def main(params, args):
     # model = nn.parallel.DataParallel(model, device_ids=[gpu_ids])
     model = nn.parallel.DataParallel(model)
 
+    # either resume model training - in which case, pass the path to checkpoint
+    # or declare initial weights
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
@@ -255,7 +291,6 @@ def main(params, args):
     else:
         model.apply(weights_init)
 
-
     train = train_dice
     test = test_dice
 
@@ -264,7 +299,8 @@ def main(params, args):
     if args.cuda:
         model = model.cuda()
 
-    # transform
+    # https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.functional.to_tensor
+    # Convert a PIL Image or numpy.ndarray to tensor
     trainTransform = transforms.Compose([
         transforms.ToTensor()
     ])
@@ -272,21 +308,27 @@ def main(params, args):
         transforms.ToTensor()
     ])
 
+    # setting optimiser from argument
     if args.opt == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=args.baseLR,
-                              momentum=args.momentum, weight_decay=weight_decay) # params['ModelParams']['baseLR']
+                              momentum=args.momentum, weight_decay=weight_decay)  # params['ModelParams']['baseLR']
     elif args.opt == 'adam':
         optimizer = optim.Adam(model.parameters(), weight_decay=weight_decay)
     elif args.opt == 'rmsprop':
-        optimizer = optim.RMSprop(model.parameters(), weight_decay=weight_decay)
-
+        optimizer = optim.RMSprop(
+            model.parameters(), weight_decay=weight_decay)
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
     # pdb.set_trace()
-    DataManagerParams = {'dstRes':np.asarray(eval(args.dstRes), dtype=float), 'VolSize':np.asarray(eval(args.VolSize), dtype=int), 'normDir':params['DataManagerParams']['normDir']}
+    DataManagerParams = {
+        'dstRes': np.asarray(eval(args.dstRes), dtype=float),
+        'VolSize': np.asarray(eval(args.VolSize), dtype=int),
+        'normDir': params['DataManagerParams']['normDir']
+    }
 
-    if params['ModelParams']['dirTestImage']:  # if exists, means test files are given.
+    # if exists, means test files are given.
+    if params['ModelParams']['dirTestImage']:
         print("\nloading training set")
         dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
                                           params['ModelParams']['dirTrainLabel'],
@@ -304,7 +346,8 @@ def main(params, args):
         test_images = dataManagerTest.getNumpyImages()
         test_labels = dataManagerTest.getNumpyGT()
 
-        testSet = customDataset.customDataset(mode='test', images=test_images, GT=test_labels, transform=testTransform)
+        testSet = customDataset.customDataset(
+            mode='test', images=test_images, GT=test_labels, transform=testTransform)
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
     elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
@@ -317,12 +360,14 @@ def main(params, args):
         numpyImages = dataManager.getNumpyImages()
         numpyGT = dataManager.getNumpyGT()
         # pdb.set_trace()
-        
-        train_images, train_labels, test_images, test_labels = train_test_split(numpyImages, numpyGT, args.testProp)
-        testSet = customDataset.customDataset(mode='test', images=test_images, GT=test_labels, transform=testTransform)
+
+        train_images, train_labels, test_images, test_labels = train_test_split(
+            numpyImages, numpyGT, args.testProp)
+        testSet = customDataset.customDataset(
+            mode='test', images=test_images, GT=test_labels, transform=testTransform)
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
-    else: # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
+    else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
         print('\n loading only train dataset')
         dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
                                      params['ModelParams']['dirTrainLabel'],
@@ -354,17 +399,18 @@ def main(params, args):
         dataPreparation[proc].start()
 
     batchData = np.zeros((batch_size, DataManagerParams['VolSize'][0],
-                                 DataManagerParams['VolSize'][1],
-                                 DataManagerParams['VolSize'][2]), dtype=float)
+                          DataManagerParams['VolSize'][1],
+                          DataManagerParams['VolSize'][2]), dtype=float)
     batchLabel = np.zeros((batch_size, DataManagerParams['VolSize'][0],
-                                  DataManagerParams['VolSize'][1],
-                                  DataManagerParams['VolSize'][2]), dtype=float)
+                           DataManagerParams['VolSize'][1],
+                           DataManagerParams['VolSize'][2]), dtype=float)
 
     trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
     testF = open(os.path.join(resultDir, 'test.csv'), 'w')
 
     for epoch in range(1, epochs+1):
-        dataQueue_tmp = dataQueue # not working from epoch = 2 and so on. why??? By Chao.
+        # not working from epoch = 2 and so on. why??? By Chao.
+        dataQueue_tmp = dataQueue
         diceOvBatch = 0
         err = 0
         for iteration in range(1, nr_iter + 1):
@@ -378,30 +424,37 @@ def main(params, args):
                 [defImg, defLab] = dataQueue_tmp.get()
 
                 batchData[i, :, :, :] = defImg.astype(dtype=np.float32)
-                batchLabel[i, :, :, :] = (defLab > 0.5).astype(dtype=np.float32)
+                batchLabel[i, :, :, :] = (
+                    defLab > 0.5).astype(dtype=np.float32)
 
             trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
                                                    transform=trainTransform)
-            trainLoader = DataLoader(trainSet, batch_size=batch_size, shuffle=True, **kwargs)
+            trainLoader = DataLoader(
+                trainSet, batch_size=batch_size, shuffle=True, **kwargs)
 
-            diceOvBatch_tmp, err_tmp = train(args, epoch, iteration, model, trainLoader, optimizer, trainF)
+            diceOvBatch_tmp, err_tmp = train(
+                args, epoch, iteration, model, trainLoader, optimizer, trainF)
 
             if args.xLabel == 'Iteration':
-                trainF.write('{},{},{}\n'.format(iteration, diceOvBatch_tmp, err_tmp))
+                trainF.write('{},{},{}\n'.format(
+                    iteration, diceOvBatch_tmp, err_tmp))
                 trainF.flush()
             elif args.xLabel == 'Epoch':
                 diceOvBatch += diceOvBatch_tmp
                 err += err_tmp
         if args.xLabel == 'Epoch':
-            trainF.write('{},{},{}\n'.format(epoch, diceOvBatch/nr_iter, err/nr_iter))
+            trainF.write('{},{},{}\n'.format(
+                epoch, diceOvBatch/nr_iter, err/nr_iter))
             trainF.flush()
 
-        if np.mod(epoch, epochs) == 0: # default to set last epoch to save checkpoint
+        if np.mod(epoch, epochs) == 0:  # default to set last epoch to save checkpoint
             save_checkpoint({'epoch': epoch,
                              'state_dict': model.state_dict(),
                              'best_prec1': best_prec1}, path=resultDir, prefix="vnet_epoch{}".format(epoch))
         if epoch == epochs and testLoader:
-            test(dataManager_toTestFunc, args, epoch, model, testLoader, testF, resultDir)  # by Chao.
+            # by Chao.
+            test(dataManager_toTestFunc, args, epoch,
+                 model, testLoader, testF, resultDir)
 
     os.system('./plot.py {} {} &'.format(args.xLabel, resultDir))
 
@@ -414,10 +467,12 @@ def main(params, args):
         dataManagerInfer = DM.DataManager(params['ModelParams']['dirInferImage'], None,
                                           params['ModelParams']['dirResult'],
                                           DataManagerParams)
-        dataManagerInfer.loadInferData()  # required.  Create .loadInferData??? by Chao.
+        # required.  Create .loadInferData??? by Chao.
+        dataManagerInfer.loadInferData()
         numpyImages = dataManagerInfer.getNumpyImages()
 
-        inferSet = customDataset.customDataset(mode='infer', images=numpyImages, GT=None, transform=testTransform)
-        inferLoader = DataLoader(inferSet, batch_size=1, shuffle=True, **kwargs)
+        inferSet = customDataset.customDataset(
+            mode='infer', images=numpyImages, GT=None, transform=testTransform)
+        inferLoader = DataLoader(
+            inferSet, batch_size=1, shuffle=True, **kwargs)
         inference(dataManagerInfer, args, inferLoader, model, resultDir)
-
