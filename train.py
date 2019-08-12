@@ -22,6 +22,8 @@ import utils as utils
 
 import vnet
 import DataManager as DM
+import DicomManager as Dim
+
 import customDataset
 # import make_graph
 
@@ -329,6 +331,10 @@ def main(params, args):
         'VolSize': np.asarray(eval(args.VolSize), dtype=int),
         'normDir': params['DataManagerParams']['normDir']
     }
+
+    # Need the dicom dataloader
+    if params['ModelParams']['task'] == 'ISBI2013':
+        DM = Dim
 
     # if exists, means test files are given.
     if params['ModelParams']['dirTestImage']:
