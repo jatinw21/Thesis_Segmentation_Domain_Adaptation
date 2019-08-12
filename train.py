@@ -254,7 +254,9 @@ def main(params, args):
         params['ModelParams']['task'], datestr())
 
     weight_decay = args.weight_decay
+    
     # https://pypi.org/project/setproctitle/
+    # set title of the current process
     setproctitle.setproctitle(resultDir)
 
     # https://docs.python.org/3/library/shutil.html#shutil.rmtree
@@ -289,6 +291,7 @@ def main(params, args):
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
+        # https://discuss.pytorch.org/t/parameters-initialisation/20001
         model.apply(weights_init)
 
     train = train_dice
@@ -393,6 +396,7 @@ def main(params, args):
 
     # processes creation
     for proc in range(0, params['ModelParams']['nProc']):
+        # the dataAugmentation processes put the augmented training images in the dataQueue
         dataPreparation[proc] = Process(target=dataAugmentation,
                                         args=(params, args, dataQueue, train_images, train_labels))
         dataPreparation[proc].daemon = True

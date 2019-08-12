@@ -19,7 +19,10 @@ params['ModelParams']['sigma'] = 15 # used to produce randomly deformed images i
 
 # params['ModelParams']['device'] = 0
 # params['ModelParams']['snapshot'] = 0
-params['ModelParams']['task'] = 'promise12'
+
+# REVIEW: change according to the two tasks
+# params['ModelParams']['task'] = 'promise12'
+params['ModelParams']['task'] = 'ISBI2013'
 
 params['ModelParams']['dirTrainImage'] = os.path.join(basePath,'dataset/imagesTr')  # if 'dirTest' is empty, denotes 'path to a dataset that will later be split into trainSet and testSet. Otherwise, denotes just trainSet.
 params['ModelParams']['dirTrainLabel'] = os.path.join(basePath,'dataset/labelsTr')
