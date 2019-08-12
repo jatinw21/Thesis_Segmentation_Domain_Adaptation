@@ -4,4 +4,9 @@ __pycache__
 env
 archive
 results
-dataset
+dataset*
+.DS_Store
+dataset/.DS_Store
+dataset/imagesTr/.DS_Store
+dataset/imagesTs/.DS_Store
+dataset/labelsTr/.DS_Store
