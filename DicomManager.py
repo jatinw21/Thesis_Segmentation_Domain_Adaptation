@@ -57,6 +57,7 @@ class DataManager(object):
         for folder in self.imageFileList:
             # the folder name is set as the id
             id = folder
+            # print(folder)
             curr_folder_path = join(self.imageFolder, folder)
             # print(curr_folder_path)
 
@@ -79,38 +80,38 @@ class DataManager(object):
             m += stats.GetMean()
 
         self.meanIntensityTrain = m/len(self.sitkImages)
-        print(self.meanIntensityTrain)
+        # print(self.meanIntensityTrain)
 
-    # def loadGT(self):
-    #     self.sitkGT = dict()
+    def loadGT(self):
+        self.sitkGT = dict()
 
-    #     for f in self.GTFileList:
-    #         # the filename before extension is set as the id
-    #         id = f.split('.')[0]
-    #         self.sitkGT[id] = sitk.Cast(
-    #             sitk.ReadImage(
-    #                 join(self.GTFolder, f)
-    #                 # Not sure exactly what is happening here. Maybe just taking darker than 05 pixels?
-    #                 # Other pixels just 0
-    #             ) > 0.5,
-    #             sitk.sitkFloat32
-    #         )
+        for f in self.GTFileList:
+            # the filename before extension is set as the id
+            id = f.split('.')[0]
+            # print(id)
 
-    # def loadTrainingData(self):
-    #     self.createImageFileList()
-    #     self.createGTFileList()
-    #     self.loadImages()
-    #     self.loadGT()
+            # Not using 0.45 threshold from here, because the results of this repo are just okay - 70%
+            # https://github.com/mirzaevinom/prostate_segmentation/blob/master/codes/train.py
+            self.sitkGT[id] = sitk.Cast(
+                sitk.ReadImage(join(self.GTFolder, f)) > 0.5,
+                sitk.sitkFloat32
+            )
 
-    # def loadTestingData(self):
-    #     self.createImageFileList()
-    #     self.createGTFileList()
-    #     self.loadImages()
-    #     self.loadGT()
+    def loadTrainingData(self):
+        self.createImageFileList()
+        self.createGTFileList()
+        self.loadImages()
+        self.loadGT()
 
-    # def loadInferData(self):
-    #     self.createImageFileList()
-    #     self.loadImages()
+    def loadTestingData(self):
+        self.createImageFileList()
+        self.createGTFileList()
+        self.loadImages()
+        self.loadGT()
+
+    def loadInferData(self):
+        self.createImageFileList()
+        self.loadImages()
 
     # def getNumpyImages(self):
     #     # http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/20_Expand_With_Interpolators.html

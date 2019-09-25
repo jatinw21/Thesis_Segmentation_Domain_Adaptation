@@ -128,3 +128,4 @@ dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
 dataManagerTrain.createImageFileList()
 dataManagerTrain.createGTFileList()
 dataManagerTrain.loadImages()
+dataManagerTrain.loadGT()
