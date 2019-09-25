@@ -22,6 +22,7 @@ import utils as utils
 
 import vnet
 import DataManager as DM
+import DicomManager as DCM
 import customDataset
 # import make_graph
 
@@ -253,8 +254,11 @@ def main(params, args):
     resultDir = 'results/vnet.base.{}.{}'.format(
         params['ModelParams']['task'], datestr())
 
+    # https://becominghuman.ai/this-thing-called-weight-decay-a7cd4bcfccab
     weight_decay = args.weight_decay
+
     # https://pypi.org/project/setproctitle/
+    # The setproctitle module allows a process to change its title (as displayed by system tools such as ps and top).
     setproctitle.setproctitle(resultDir)
 
     # https://docs.python.org/3/library/shutil.html#shutil.rmtree
@@ -264,12 +268,16 @@ def main(params, args):
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+    # https://discuss.pytorch.org/t/what-is-manual-seed/5939/4
+    # You just need to call torch.manual_seed(seed), and it will set the seed of the random number generator to a fixed value,
+    # so that when you call for example torch.rand(2), the results will be reproducible.
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
     print("build vnet")
     model = vnet.VNet(elu=False, nll=False)
+    
     gpu_ids = args.gpu_ids
     # torch.cuda.set_device(gpu_ids) # why do I have to add this line? It seems the below line is useless to apply GPU devices. By Chao.
     # model = nn.parallel.DataParallel(model, device_ids=[gpu_ids])
@@ -283,12 +291,15 @@ def main(params, args):
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
+            
+            # A state_dict is simply a Python dictionary object that maps each layer to its parameter tensor.
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.evaluate, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
+        # https://stackoverflow.com/questions/49433936/how-to-initialize-weights-in-pytorch
         model.apply(weights_init)
 
     train = train_dice
@@ -326,6 +337,10 @@ def main(params, args):
         'VolSize': np.asarray(eval(args.VolSize), dtype=int),
         'normDir': params['DataManagerParams']['normDir']
     }
+
+    # NOTE: Change the data manager according to task at hand
+    if params['ModelParams']['task'] == 'nci-isbi-2013':
+        DM = DCM
 
     # if exists, means test files are given.
     if params['ModelParams']['dirTestImage']:
