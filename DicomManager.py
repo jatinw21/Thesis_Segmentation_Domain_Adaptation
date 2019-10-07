@@ -316,3 +316,4 @@ class DataManager(object):
         #print join(self.resultsDir, filename + '_result' + ext)
         writer.SetFileName(join(resultDir, key + resultTag + ext))
         writer.Execute(toWrite)
+
