@@ -20,23 +20,33 @@ params['ModelParams']['sigma'] = 15 # used to produce randomly deformed images i
 # params['ModelParams']['device'] = 0
 # params['ModelParams']['snapshot'] = 0
 
-# params['ModelParams']['task'] = 'promise12'
-params['ModelParams']['task'] = 'nci-isbi-2013'
+# NOTE: change task here
+# task = params['ModelParams']['task'] = 'promise12'
+task = params['ModelParams']['task'] = 'nci-isbi-2013'
 
 params['ModelParams']['dirTrainImage'] = os.path.join(basePath,'dataset/imagesTr')  # if 'dirTest' is empty, denotes 'path to a dataset that will later be split into trainSet and testSet. Otherwise, denotes just trainSet.
 params['ModelParams']['dirTrainLabel'] = os.path.join(basePath,'dataset/labelsTr')
 
 # updated for 'nci-isbi-2013'
-params['ModelParams']['dirTestImage'] = os.path.join(basePath,'dataset/imagesTs') # path to test images
-params['ModelParams']['dirTestLabel'] = os.path.join(basePath,'dataset/labelsTs') # path to test labels
+if task == 'nci-isbi-2013'
+    params['ModelParams']['dirTestImage'] = os.path.join(basePath,'dataset/imagesTs') # path to test images
+    params['ModelParams']['dirTestLabel'] = os.path.join(basePath,'dataset/labelsTs') # path to test labels
+else:
+    params['ModelParams']['dirTestImage'] = '' # path to test images
+    params['ModelParams']['dirTestLabel'] = '' # path to test labels
 
-# no need to do this now as there is separate test set
+# no need to do this now as there is separate test set. This is added as an arg later anyway
 # params['ModelParams']['testProp'] = 0.2  # if 'dirTestImage' or 'dirTestLabel' is empty, split 'dirTrainImage' and 'dirTrainLabel' into train and test
 
 # no images with no labels provided - not needed for this run
-params['ModelParams']['dirInferImage'] = '' # used for inference, usually no labels provided.
+if task == 'nci-isbi-2013':
+    params['ModelParams']['dirInferImage'] = '' # used for inference, usually no labels provided.
+else:
+    params['ModelParams']['dirInferImage'] = os.path.join(basePath,'dataset/imagesTs')
 
-params['ModelParams']['dirResult'] = os.path.join(basePath, 'results'+'_'+params['ModelParams']['task'])  # where we need to save the results (relative to the base path)
+# pretty sure this is never used and is overwritten by resultDir = 'results/...' later
+# it is being passed to the datamanager class but never actually used. So, can remove later
+params['ModelParams']['dirResult'] = os.path.join(basePath, 'results')  # where we need to save the results (relative to the base path)
 
 # seems like snapshots aren't saved while training, but still a model is saved - should be looked into -> when?
 # ????

@@ -11,7 +11,7 @@ class customDataset(data.Dataset):
     For medical segmentation decathlon.
     '''
 
-    def __init__(self, mode, images, GT, transform=None, GT_transform=None):
+    def __init__(self, mode, images, GT, task, transform=None, GT_transform=None):
         if images is None:
             raise(RuntimeError("images must be set"))
 
@@ -21,6 +21,10 @@ class customDataset(data.Dataset):
         # training images and ground truth
         self.images = images
         self.GT = GT
+
+        # NOTE: new - making this class aware of the task so changes like names of labels
+        # can be made accordingly
+        self.task = task
         
         # transformations
         self.transform = transform
@@ -80,9 +84,11 @@ class customDataset(data.Dataset):
                 image = torch.from_numpy(image)
                 # image = self.transform(image)
 
-            # BUG: add param to know task and change this accrodingly
-            # GT = self.GT[id+'_segmentation'] # require customization
-            GT = self.GT[id+'_truth']
+            # FIXED. NOTE: requires customisation
+            if self.task == 'nci-isbi-2013'
+                GT = self.GT[id+'_truth']
+            else:
+                GT = self.GT[id+'_segmentation'] # require customization
             
             GT = np.transpose(GT, [2, 1, 0])
             if self.GT_transform is not None:

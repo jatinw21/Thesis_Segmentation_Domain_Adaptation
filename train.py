@@ -49,6 +49,8 @@ def save_checkpoint(state, path, prefix, filename='checkpoint.pth.tar'):
 def train_test_split(images, labels, test_proportion):
     # images and labels are both dict().
     # pdb.set_trace()
+    # NOTE: '_segmentation' appended to file name is only true for promise12
+    # but because only promise12 needs train_test split, not nci - no need to change
     keys = list(images.keys())
     size = len(keys)
     test_keys = sample(keys, int(test_proportion*size))
@@ -65,6 +67,7 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
     nr_iter = args.numIterations  # params['ModelParams']['numIterations']
     batchsize = args.batchsize  # params['ModelParams']['batchsize']
+    task = params['ModelParams']['task']
 
     # pdb.set_trace()
     keysIMG = list(numpyImages.keys())
@@ -81,10 +84,13 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
         currImgKey = keysIMG[whichData]
         # require customization. This is for PROMISE12 data.
-        # BUG: change to set according to task
-        # currGtKey = keysIMG[whichData] + '_segmentation'
-        # _truth not for training data
-        currGtKey = keysIMG[whichData] # + '_truth'
+        
+        if task == 'nci-isbi-2013'
+            # NOTE: the training set labels for promise12 have same name as the actual file
+            # + _truth is for test set
+            currGtKey = keysIMG[whichData]
+        else:
+            currGtKey = keysIMG[whichData] + '_segmentation'
 
         # print("keysIMG type:{}\nkeysIMG:{}".format(type(keysIMG),str(keysIMG)))
         # print("whichData:{}".format(whichData))
@@ -263,10 +269,12 @@ def main(params, args):
     epochs = args.nEpochs
     nr_iter = args.numIterations  # params['ModelParams']['numIterations']
     batch_size = args.batchsize  # params['ModelParams']['batchsize']
+    task = params['ModelParams']['task']
 
     # for every run, a folder is created and this is how it gets its name
     resultDir = 'results/vnet.base.{}.{}'.format(
-        params['ModelParams']['task'], datestr())
+        task, datestr())
+
 
     # https://becominghuman.ai/this-thing-called-weight-decay-a7cd4bcfccab
     weight_decay = args.weight_decay
@@ -353,7 +361,7 @@ def main(params, args):
     }
 
     # NOTE: Change the data manager according to task at hand
-    if params['ModelParams']['task'] == 'nci-isbi-2013':
+    if task == 'nci-isbi-2013':
         DM = DCM
 
     # if exists, means test files are given.
@@ -380,6 +388,8 @@ def main(params, args):
             mode='test',
             images=test_images,
             GT=test_labels,
+
+            task=task,
             
             # testTransform is using pytorch transform, just to convert ndarray to a tensor
             # REVIEW: shouldn't we be setting both transform and GT_transform?
@@ -403,7 +413,7 @@ def main(params, args):
         train_images, train_labels, test_images, test_labels = train_test_split(
             numpyImages, numpyGT, args.testProp)
         testSet = customDataset.customDataset(
-            mode='test', images=test_images, GT=test_labels, transform=testTransform)
+            mode='test', images=test_images, task=task, GT=test_labels, transform=testTransform)
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
     else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
@@ -469,6 +479,7 @@ def main(params, args):
                     defLab > 0.5).astype(dtype=np.float32)
 
             trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
+                                                   task=task,
                                                    transform=trainTransform)
             trainLoader = DataLoader(
                 trainSet, batch_size=batch_size, shuffle=True, **kwargs)
@@ -513,7 +524,7 @@ def main(params, args):
         numpyImages = dataManagerInfer.getNumpyImages()
 
         inferSet = customDataset.customDataset(
-            mode='infer', images=numpyImages, GT=None, transform=testTransform)
+            mode='infer', images=numpyImages, task=task, GT=None, transform=testTransform)
         inferLoader = DataLoader(
             inferSet, batch_size=1, shuffle=True, **kwargs)
         inference(dataManagerInfer, args, inferLoader, model, resultDir)
