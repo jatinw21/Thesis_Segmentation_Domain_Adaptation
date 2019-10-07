@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+from sys import exit
 from os.path import splitext
 from random import sample
 import time
@@ -86,7 +87,7 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
         currImgKey = keysIMG[whichData]
         # require customization. This is for PROMISE12 data.
         
-        if task == 'nci-isbi-2013'
+        if task == 'nci-isbi-2013':
             # NOTE: the training set labels for promise12 have same name as the actual file
             # + _truth is for test set
             currGtKey = keysIMG[whichData]
@@ -263,6 +264,7 @@ def inference(dataManager, args, loader, model, resultDir):
 
 ## main method
 def main(params, args):
+    ###############      NOTE: COMMON PART STARTS        ##################
     # https://github.com/pytorch/examples/blob/master/imagenet/main.py#L139
     # best_prec1 sort of can be seen here in above link as best_acc1.
     # This is used to keep track of best_acc1 achieved yet in the checkpoints
@@ -307,230 +309,348 @@ def main(params, args):
     # model = nn.parallel.DataParallel(model, device_ids=[gpu_ids])
     model = nn.parallel.DataParallel(model)
 
-    # either resume model training - in which case, pass the path to checkpoint
-    # or declare initial weights
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
+    global DM
+    # NOTE: Change the data manager according to task at hand
+    if task == 'nci-isbi-2013':
+        DM = DCM
+    else:
+        DM = DM
+    ###############      NOTE: COMMON PART ENDS       ##################
+
+    if not args.testonly:
+        # either resume model training - in which case, pass the path to checkpoint
+        # or declare initial weights
+        if args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume)
+                args.start_epoch = checkpoint['epoch']
+                best_prec1 = checkpoint['best_prec1']
+                
+                # A state_dict is simply a Python dictionary object that maps each layer to its parameter tensor.
+                model.load_state_dict(checkpoint['state_dict'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.evaluate, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+        else:
+
+            # https://stackoverflow.com/questions/49433936/how-to-initialize-weights-in-pytorch
+            # https://discuss.pytorch.org/t/parameters-initialisation/20001
+            model.apply(weights_init)
+
+        train = train_dice
+        test = test_dice
+
+        print('  + Number of params: {}'.format(
+            sum([p.data.nelement() for p in model.parameters()])))
+        if args.cuda:
+            model = model.cuda()
+
+        # https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.functional.to_tensor
+        # Convert a PIL Image or numpy.ndarray to tensor
+        trainTransform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+        testTransform = transforms.Compose([
+            transforms.ToTensor()
+        ])
+
+        # setting optimiser from argument
+        if args.opt == 'sgd':
+            optimizer = optim.SGD(model.parameters(), lr=args.baseLR,
+                                momentum=args.momentum, weight_decay=weight_decay)  # params['ModelParams']['baseLR']
+        elif args.opt == 'adam':
+            optimizer = optim.Adam(model.parameters(), weight_decay=weight_decay)
+        elif args.opt == 'rmsprop':
+            optimizer = optim.RMSprop(
+                model.parameters(), weight_decay=weight_decay)
+
+        kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+
+        # pdb.set_trace()
+        DataManagerParams = {
+            'dstRes': np.asarray(eval(args.dstRes), dtype=float),
+            'VolSize': np.asarray(eval(args.VolSize), dtype=int),
+            'normDir': params['DataManagerParams']['normDir']
+        }
+
+        # if exists, means test files are given.
+        if params['ModelParams']['dirTestImage']:
+            print("\nloading training set")
+            dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
+                                            params['ModelParams']['dirTrainLabel'],
+                                            params['ModelParams']['dirResult'],
+                                            DataManagerParams)
+            dataManagerTrain.loadTrainingData()  # required
+            train_images = dataManagerTrain.getNumpyImages()
+            train_labels = dataManagerTrain.getNumpyGT()
+
+            print("\nloading test set")
+            dataManagerTest = DM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
+                                            params['ModelParams']['dirResult'],
+                                            DataManagerParams)
+            dataManagerTest.loadTestingData()  # required
+            test_images = dataManagerTest.getNumpyImages()
+            test_labels = dataManagerTest.getNumpyGT()
+
+            
+            testSet = customDataset.customDataset(
+                mode='test',
+                images=test_images,
+                GT=test_labels,
+
+                task=task,
+                
+                # testTransform is using pytorch transform, just to convert ndarray to a tensor
+                # REVIEW: shouldn't we be setting both transform and GT_transform?
+                # to remind - the transformation is just converting it to tensors
+                transform=testTransform
+            )
+            
+            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
+
+        elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
+            print('\n loading dataset, will split into train and test')
+            dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
+                                        params['ModelParams']['dirTrainLabel'],
+                                        params['ModelParams']['dirResult'],
+                                        DataManagerParams)
+            dataManager.loadTrainingData()  # required
+            numpyImages = dataManager.getNumpyImages()
+            numpyGT = dataManager.getNumpyGT()
+            # pdb.set_trace()
+
+            train_images, train_labels, test_images, test_labels = train_test_split(
+                numpyImages, numpyGT, args.testProp)
+            testSet = customDataset.customDataset(
+                mode='test', images=test_images, task=task, GT=test_labels, transform=testTransform)
+            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
+
+        else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
+            print('\n loading only train dataset')
+            dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
+                                        params['ModelParams']['dirTrainLabel'],
+                                        params['ModelParams']['dirResult'],
+                                        DataManagerParams)
+            dataManager.loadTrainingData()  # required
+            train_images = dataManager.getNumpyImages()
+            train_labels = dataManager.getNumpyGT()
+
+            test_images = None
+            test_labels = None
+            testSet = None
+            testLoader = None
+
+        if params['ModelParams']['dirTestImage']:
+            dataManager_toTestFunc = dataManagerTest
+        else:
+            dataManager_toTestFunc = dataManager
+
+        ### For train_images and train_labels, starting data augmentation and loading augmented data with multiprocessing
+        dataQueue = Queue(30)  # max 30 images in queue?
+        dataPreparation = [None] * params['ModelParams']['nProc']
+
+        # processes creation
+        for proc in range(0, params['ModelParams']['nProc']):
+            # the dataAugmentation processes put the augmented training images in the dataQueue
+            dataPreparation[proc] = Process(target=dataAugmentation,
+                                            args=(params, args, dataQueue, train_images, train_labels))
+            dataPreparation[proc].daemon = True
+            dataPreparation[proc].start()
+
+        batchData = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
+        batchLabel = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
+
+        trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
+        testF = open(os.path.join(resultDir, 'test.csv'), 'w')
+
+        print(torch.cuda.is_available())
+
+        for epoch in range(1, epochs+1):
+            # not working from epoch = 2 and so on. why??? By Chao.
+            dataQueue_tmp = dataQueue
+            diceOvBatch = 0
+            err = 0
+            for iteration in range(1, nr_iter + 1):
+                # adjust_opt(args.opt, optimizer, iteration+)
+                if args.opt == 'sgd':
+                    if np.mod(iteration, args.stepsize) == 0:
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] *= args.gamma
+
+                for i in range(batch_size):
+                    [defImg, defLab] = dataQueue_tmp.get()
+
+                    batchData[i, :, :, :] = defImg.astype(dtype=np.float32)
+                    batchLabel[i, :, :, :] = (
+                        defLab > 0.5).astype(dtype=np.float32)
+
+                trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
+                                                    task=task,
+                                                    transform=trainTransform)
+                trainLoader = DataLoader(
+                    trainSet, batch_size=batch_size, shuffle=True, **kwargs)
+
+                diceOvBatch_tmp, err_tmp = train(
+                    args, epoch, iteration, model, trainLoader, optimizer, trainF)
+
+                if args.xLabel == 'Iteration':
+                    trainF.write('{},{},{}\n'.format(
+                        iteration, diceOvBatch_tmp, err_tmp))
+                    trainF.flush()
+                elif args.xLabel == 'Epoch':
+                    diceOvBatch += diceOvBatch_tmp
+                    err += err_tmp
+            if args.xLabel == 'Epoch':
+                trainF.write('{},{},{}\n'.format(
+                    epoch, diceOvBatch/nr_iter, err/nr_iter))
+                trainF.flush()
+
+            if np.mod(epoch, epochs) == 0:  # default to set last epoch to save checkpoint
+                save_checkpoint({'epoch': epoch,
+                                'state_dict': model.state_dict(),
+                                'best_prec1': best_prec1}, path=resultDir, prefix="vnet_epoch{}".format(epoch))
+            if epoch == epochs and testLoader:
+                # by Chao.
+                test(dataManager_toTestFunc, args, epoch,
+                    model, testLoader, testF, resultDir)
+
+        os.system('./plot.py {} {} &'.format(args.xLabel, resultDir))
+
+        trainF.close()
+        testF.close()
+
+        # inference, i.e. output predicted mask for test data
+        if params['ModelParams']['dirInferImage'] != '':
+            print("loading inference data")
+            dataManagerInfer = DM.DataManager(params['ModelParams']['dirInferImage'], None,
+                                            params['ModelParams']['dirResult'],
+                                            DataManagerParams)
+            # required.  Create .loadInferData??? by Chao.
+            dataManagerInfer.loadInferData()
+            numpyImages = dataManagerInfer.getNumpyImages()
+
+            inferSet = customDataset.customDataset(
+                mode='infer', images=numpyImages, task=task, GT=None, transform=testTransform)
+
+            inferLoader = DataLoader(inferSet, batch_size=1, shuffle=True, **kwargs)
+
+            inference(dataManagerInfer, args, inferLoader, model, resultDir)
+    else:
+        print(f"Only running testing on the test dataset of '{params['ModelParams']['task']}' using model saved at '{args.testonly}'")
+
+        # BUG: Initially this will work only for the case of using trained model of promise12 on nci, because nci has a clearer test data with labels,
+        # the accuracy of which would be easier to compare
+        
+        # REVIEW: All experimental below
+        assert not args.resume, "Cannot resume training when only testing. Remone one of the resume or testonly flags"
+        
+        model_path = args.testonly
+        
+        # load model
+        if os.path.isfile(model_path):
+            print("=> loading checkpoint '{}'".format(model_path))
+            checkpoint = torch.load(model_path)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
             
             # A state_dict is simply a Python dictionary object that maps each layer to its parameter tensor.
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.evaluate, checkpoint['epoch']))
+                .format(model_path, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
-    else:
+            exit()
 
-        # https://stackoverflow.com/questions/49433936/how-to-initialize-weights-in-pytorch
-        # https://discuss.pytorch.org/t/parameters-initialisation/20001
-        model.apply(weights_init)
+        test = test_dice
 
-    train = train_dice
-    test = test_dice
+        print('  + Number of params: {}'.format(
+            sum([p.data.nelement() for p in model.parameters()])))
+        if args.cuda:
+            model = model.cuda()
 
-    print('  + Number of params: {}'.format(
-        sum([p.data.nelement() for p in model.parameters()])))
-    if args.cuda:
-        model = model.cuda()
+        testTransform = transforms.Compose([
+            transforms.ToTensor()
+        ])
 
-    # https://pytorch.org/docs/stable/torchvision/transforms.html#torchvision.transforms.functional.to_tensor
-    # Convert a PIL Image or numpy.ndarray to tensor
-    trainTransform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    testTransform = transforms.Compose([
-        transforms.ToTensor()
-    ])
+        kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
 
-    # setting optimiser from argument
-    if args.opt == 'sgd':
-        optimizer = optim.SGD(model.parameters(), lr=args.baseLR,
-                              momentum=args.momentum, weight_decay=weight_decay)  # params['ModelParams']['baseLR']
-    elif args.opt == 'adam':
-        optimizer = optim.Adam(model.parameters(), weight_decay=weight_decay)
-    elif args.opt == 'rmsprop':
-        optimizer = optim.RMSprop(
-            model.parameters(), weight_decay=weight_decay)
-
-    kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
-
-    # pdb.set_trace()
-    DataManagerParams = {
-        'dstRes': np.asarray(eval(args.dstRes), dtype=float),
-        'VolSize': np.asarray(eval(args.VolSize), dtype=int),
-        'normDir': params['DataManagerParams']['normDir']
-    }
-
-
-    # NOTE: Change the data manager according to task at hand
-    if task == 'nci-isbi-2013':
-        DM = DCM
-
-    # if exists, means test files are given.
-    if params['ModelParams']['dirTestImage']:
-        print("\nloading training set")
-        dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                          params['ModelParams']['dirTrainLabel'],
-                                          params['ModelParams']['dirResult'],
-                                          DataManagerParams)
-        dataManagerTrain.loadTrainingData()  # required
-        train_images = dataManagerTrain.getNumpyImages()
-        train_labels = dataManagerTrain.getNumpyGT()
-
-        print("\nloading test set")
-        dataManagerTest = DM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
-                                         params['ModelParams']['dirResult'],
-                                         DataManagerParams)
-        dataManagerTest.loadTestingData()  # required
-        test_images = dataManagerTest.getNumpyImages()
-        test_labels = dataManagerTest.getNumpyGT()
-
-        
-        testSet = customDataset.customDataset(
-            mode='test',
-            images=test_images,
-            GT=test_labels,
-
-            task=task,
-            
-            # testTransform is using pytorch transform, just to convert ndarray to a tensor
-            # REVIEW: shouldn't we be setting both transform and GT_transform?
-            # to remind - the transformation is just converting it to tensors
-            transform=testTransform
-        )
-        
-        testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
-
-    elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
-        print('\n loading dataset, will split into train and test')
-        dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                     params['ModelParams']['dirTrainLabel'],
-                                     params['ModelParams']['dirResult'],
-                                     DataManagerParams)
-        dataManager.loadTrainingData()  # required
-        numpyImages = dataManager.getNumpyImages()
-        numpyGT = dataManager.getNumpyGT()
         # pdb.set_trace()
+        DataManagerParams = {
+            'dstRes': np.asarray(eval(args.dstRes), dtype=float),
+            'VolSize': np.asarray(eval(args.VolSize), dtype=int),
+            'normDir': params['DataManagerParams']['normDir']
+        }
 
-        train_images, train_labels, test_images, test_labels = train_test_split(
-            numpyImages, numpyGT, args.testProp)
-        testSet = customDataset.customDataset(
-            mode='test', images=test_images, task=task, GT=test_labels, transform=testTransform)
-        testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
+        # if exists, means test files are given.
+        if params['ModelParams']['dirTestImage']:
+            print("\nloading test set")
+            dataManagerTest = DM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
+                                            params['ModelParams']['dirResult'],
+                                            DataManagerParams)
+            dataManagerTest.loadTestingData()  # required
+            test_images = dataManagerTest.getNumpyImages()
+            test_labels = dataManagerTest.getNumpyGT()
 
-    else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
-        print('\n loading only train dataset')
-        dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                     params['ModelParams']['dirTrainLabel'],
-                                     params['ModelParams']['dirResult'],
-                                     DataManagerParams)
-        dataManager.loadTrainingData()  # required
-        train_images = dataManager.getNumpyImages()
-        train_labels = dataManager.getNumpyGT()
+            
+            testSet = customDataset.customDataset(
+                mode='test',
+                images=test_images,
+                GT=test_labels,
 
-        test_images = None
-        test_labels = None
-        testSet = None
-        testLoader = None
+                task=task,
+                
+                # testTransform is using pytorch transform, just to convert ndarray to a tensor
+                # REVIEW: shouldn't we be setting both transform and GT_transform?
+                # to remind - the transformation is just converting it to tensors
+                transform=testTransform
+            )
+            
+            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
-    if params['ModelParams']['dirTestImage']:
-        dataManager_toTestFunc = dataManagerTest
-    else:
-        dataManager_toTestFunc = dataManager
+        elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
+            print('\n loading dataset, will split into train and test')
+            dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
+                                        params['ModelParams']['dirTrainLabel'],
+                                        params['ModelParams']['dirResult'],
+                                        DataManagerParams)
+            dataManager.loadTrainingData()  # required
+            numpyImages = dataManager.getNumpyImages()
+            numpyGT = dataManager.getNumpyGT()
+            # pdb.set_trace()
 
-    ### For train_images and train_labels, starting data augmentation and loading augmented data with multiprocessing
-    dataQueue = Queue(30)  # max 30 images in queue?
-    dataPreparation = [None] * params['ModelParams']['nProc']
+            train_images, train_labels, test_images, test_labels = train_test_split(
+                numpyImages, numpyGT, args.testProp)
+            testSet = customDataset.customDataset(
+                mode='test', images=test_images, task=task, GT=test_labels, transform=testTransform)
+            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
-    # processes creation
-    for proc in range(0, params['ModelParams']['nProc']):
-        # the dataAugmentation processes put the augmented training images in the dataQueue
-        dataPreparation[proc] = Process(target=dataAugmentation,
-                                        args=(params, args, dataQueue, train_images, train_labels))
-        dataPreparation[proc].daemon = True
-        dataPreparation[proc].start()
+        else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
+            assert False, "There needs to be a test set specified for testonly mode"
 
-    batchData = np.zeros((batch_size, DataManagerParams['VolSize'][0],
-                          DataManagerParams['VolSize'][1],
-                          DataManagerParams['VolSize'][2]), dtype=float)
-    batchLabel = np.zeros((batch_size, DataManagerParams['VolSize'][0],
-                           DataManagerParams['VolSize'][1],
-                           DataManagerParams['VolSize'][2]), dtype=float)
+        if params['ModelParams']['dirTestImage']:
+            dataManager_toTestFunc = dataManagerTest
+        else:
+            dataManager_toTestFunc = dataManager
 
-    trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
-    testF = open(os.path.join(resultDir, 'test.csv'), 'w')
+        batchData = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
+        batchLabel = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
 
-    print(torch.cuda.is_available())
+        testF = open(os.path.join(resultDir, 'test.csv'), 'w')
 
-    for epoch in range(1, epochs+1):
-        # not working from epoch = 2 and so on. why??? By Chao.
-        dataQueue_tmp = dataQueue
-        diceOvBatch = 0
-        err = 0
-        for iteration in range(1, nr_iter + 1):
-            # adjust_opt(args.opt, optimizer, iteration+)
-            if args.opt == 'sgd':
-                if np.mod(iteration, args.stepsize) == 0:
-                    for param_group in optimizer.param_groups:
-                        param_group['lr'] *= args.gamma
+        print(torch.cuda.is_available())
 
-            for i in range(batch_size):
-                [defImg, defLab] = dataQueue_tmp.get()
+        epoch = 1
+        test(dataManager_toTestFunc, args, epoch,
+            model, testLoader, testF, resultDir)
 
-                batchData[i, :, :, :] = defImg.astype(dtype=np.float32)
-                batchLabel[i, :, :, :] = (
-                    defLab > 0.5).astype(dtype=np.float32)
-
-            trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
-                                                   task=task,
-                                                   transform=trainTransform)
-            trainLoader = DataLoader(
-                trainSet, batch_size=batch_size, shuffle=True, **kwargs)
-
-            diceOvBatch_tmp, err_tmp = train(
-                args, epoch, iteration, model, trainLoader, optimizer, trainF)
-
-            if args.xLabel == 'Iteration':
-                trainF.write('{},{},{}\n'.format(
-                    iteration, diceOvBatch_tmp, err_tmp))
-                trainF.flush()
-            elif args.xLabel == 'Epoch':
-                diceOvBatch += diceOvBatch_tmp
-                err += err_tmp
-        if args.xLabel == 'Epoch':
-            trainF.write('{},{},{}\n'.format(
-                epoch, diceOvBatch/nr_iter, err/nr_iter))
-            trainF.flush()
-
-        if np.mod(epoch, epochs) == 0:  # default to set last epoch to save checkpoint
-            save_checkpoint({'epoch': epoch,
-                             'state_dict': model.state_dict(),
-                             'best_prec1': best_prec1}, path=resultDir, prefix="vnet_epoch{}".format(epoch))
-        if epoch == epochs and testLoader:
-            # by Chao.
-            test(dataManager_toTestFunc, args, epoch,
-                 model, testLoader, testF, resultDir)
-
-    os.system('./plot.py {} {} &'.format(args.xLabel, resultDir))
-
-    trainF.close()
-    testF.close()
-
-    # inference, i.e. output predicted mask for test data in .mhd
-    if params['ModelParams']['dirInferImage'] != '':
-        print("loading inference data")
-        dataManagerInfer = DM.DataManager(params['ModelParams']['dirInferImage'], None,
-                                          params['ModelParams']['dirResult'],
-                                          DataManagerParams)
-        # required.  Create .loadInferData??? by Chao.
-        dataManagerInfer.loadInferData()
-        numpyImages = dataManagerInfer.getNumpyImages()
-
-        inferSet = customDataset.customDataset(
-            mode='infer', images=numpyImages, task=task, GT=None, transform=testTransform)
-        inferLoader = DataLoader(
-            inferSet, batch_size=1, shuffle=True, **kwargs)
-        inference(dataManagerInfer, args, inferLoader, model, resultDir)
+        testF.close()

@@ -8,6 +8,12 @@ import numpy as np
 
 import train
 
+TEST = True
+if TEST:
+    iterations = 2
+else:
+    iterations = 30000
+
 basePath = os.getcwd()
 
 params = dict()
@@ -21,14 +27,14 @@ params['ModelParams']['sigma'] = 15 # used to produce randomly deformed images i
 # params['ModelParams']['snapshot'] = 0
 
 # NOTE: change task here
-# task = params['ModelParams']['task'] = 'promise12'
-task = params['ModelParams']['task'] = 'nci-isbi-2013'
+task = params['ModelParams']['task'] = 'promise12'
+# task = params['ModelParams']['task'] = 'nci-isbi-2013'
 
 params['ModelParams']['dirTrainImage'] = os.path.join(basePath,'dataset/imagesTr')  # if 'dirTest' is empty, denotes 'path to a dataset that will later be split into trainSet and testSet. Otherwise, denotes just trainSet.
 params['ModelParams']['dirTrainLabel'] = os.path.join(basePath,'dataset/labelsTr')
 
 # updated for 'nci-isbi-2013'
-if task == 'nci-isbi-2013'
+if task == 'nci-isbi-2013':
     params['ModelParams']['dirTestImage'] = os.path.join(basePath,'dataset/imagesTs') # path to test images
     params['ModelParams']['dirTestLabel'] = os.path.join(basePath,'dataset/labelsTs') # path to test labels
 else:
@@ -84,7 +90,7 @@ parser.add_argument('--batchsize', type=int, default=2)
 
 # around 30,000 - 50,000 for actual dataset. After that it starts overfitting for promise12
 # 10 is set for testing. Real should be like 50,000
-parser.add_argument('--numIterations', type=int, default=30000) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
+parser.add_argument('--numIterations', type=int, default=iterations) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
 
 parser.add_argument('--baseLR', type=float, default=0.0001) # the learning rate, initial one
 parser.add_argument('--momentum', type=float, default=0.99)
@@ -108,13 +114,23 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 
+# dest gives a name to the arg, so it can be referred by args.evaluate
+# https://docs.python.org/2/library/argparse.html for store_true
+# https://stackoverflow.com/questions/8203622/argparse-store-false-if-unspecified
+# The store_true option automatically creates a default value of False.
+# Likewise, store_false will default to True when the command-line argument is not present.
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true',
                     help='evaluate model on validation set')
+
+# NOTE: added new
+parser.add_argument('--test', dest='testonly', type=str, metavar='PATH',
+                    default='',
+                    help='path to checkpoint to be used to test')
+
 
 parser.add_argument('--no-cuda', action='store_true', default=False)
 
 args = parser.parse_args()
-
 # print('\n+sys arguments:\n' + str(args))
 
 #  load dataset, train, test(i.e. output predicted mask for test data in .mhd)

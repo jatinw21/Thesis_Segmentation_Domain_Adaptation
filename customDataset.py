@@ -85,7 +85,7 @@ class customDataset(data.Dataset):
                 # image = self.transform(image)
 
             # FIXED. NOTE: requires customisation
-            if self.task == 'nci-isbi-2013'
+            if self.task == 'nci-isbi-2013':
                 GT = self.GT[id+'_truth']
             else:
                 GT = self.GT[id+'_segmentation'] # require customization
