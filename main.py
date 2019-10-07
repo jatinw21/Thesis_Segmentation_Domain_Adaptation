@@ -74,7 +74,7 @@ parser.add_argument('--batchsize', type=int, default=2)
 
 # around 30,000 - 50,000 for actual dataset. After that it starts overfitting for promise12
 # 10 is set for testing. Real should be like 50,000
-parser.add_argument('--numIterations', type=int, default=10) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
+parser.add_argument('--numIterations', type=int, default=30000) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
 
 parser.add_argument('--baseLR', type=float, default=0.0001) # the learning rate, initial one
 parser.add_argument('--momentum', type=float, default=0.99)
@@ -109,23 +109,11 @@ args = parser.parse_args()
 
 #  load dataset, train, test(i.e. output predicted mask for test data in .mhd)
 # NOTE: Uncomment later
-# train.main(params, args)
+train.main(params, args)
 
 
 # NOTE: TESTING AREA
-import DicomManager as DM
 
-DataManagerParams = {
-    'dstRes': np.asarray(eval(args.dstRes), dtype=float),
-    'VolSize': np.asarray(eval(args.VolSize), dtype=int),
-    'normDir': params['DataManagerParams']['normDir']
-}
-
-dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                          params['ModelParams']['dirTrainLabel'],
-                                          params['ModelParams']['dirResult'],
-                                          DataManagerParams)
-dataManagerTrain.createImageFileList()
-dataManagerTrain.createGTFileList()
-dataManagerTrain.loadImages()
-dataManagerTrain.loadGT()
+# NOTE: Trained models to be used for evaluation
+# results/vnet.base.promise12.20190710_1045/vnet_epoch1_checkpoint.pth.tar
+# results/vnet.base.nci-isbi-2013.20191005_0155/vnet_epoch1_checkpoint.pth.tar

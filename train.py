@@ -26,6 +26,7 @@ import DicomManager as DCM
 import customDataset
 # import make_graph
 
+iteration_dice_average = 0
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -80,7 +81,11 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
         currImgKey = keysIMG[whichData]
         # require customization. This is for PROMISE12 data.
-        currGtKey = keysIMG[whichData] + '_segmentation'
+        # BUG: change to set according to task
+        # currGtKey = keysIMG[whichData] + '_segmentation'
+        # _truth not for training data
+        currGtKey = keysIMG[whichData] # + '_truth'
+
         # print("keysIMG type:{}\nkeysIMG:{}".format(type(keysIMG),str(keysIMG)))
         # print("whichData:{}".format(whichData))
         # pdb.set_trace()
@@ -120,9 +125,13 @@ def adjust_opt(optAlg, optimizer, iteration):
 
 
 def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
+    global iteration_dice_average
+
     model.train()
     nProcessed = 0
     batch_size = len(trainLoader.dataset)
+
+    
     for batch_idx, output in enumerate(trainLoader):
         # data shape [batch_size, channels, z, y, x], output shape [batch_size, z, y, x]
         data, target = output
@@ -143,11 +152,16 @@ def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
         nProcessed += len(data)
         # loss.data[0] is sum of dice coefficient over a mini-batch. By Chao.
         diceOvBatch = loss.data[0]/batch_size
+        iteration_dice_average += diceOvBatch
         err = 100.*(1. - diceOvBatch)
 
-    if np.mod(iteration, 10) == 0:
-        print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
-            epoch, iteration, diceOvBatch, err))
+    num_it_average = 10
+    if np.mod(iteration, num_it_average) == 0:
+        iteration_dice_average /= num_it_average
+        print(f'\nFor trainning: epoch: {epoch} iteration: {iteration} \tdice_coefficient over last {num_it_average} : {iteration_dice_average:.4f}\n')
+        iteration_dice_average = 0
+        # print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
+        #     epoch, iteration, diceOvBatch, err))
 
     return diceOvBatch, err
 
@@ -361,8 +375,18 @@ def main(params, args):
         test_images = dataManagerTest.getNumpyImages()
         test_labels = dataManagerTest.getNumpyGT()
 
+        
         testSet = customDataset.customDataset(
-            mode='test', images=test_images, GT=test_labels, transform=testTransform)
+            mode='test',
+            images=test_images,
+            GT=test_labels,
+            
+            # testTransform is using pytorch transform, just to convert ndarray to a tensor
+            # REVIEW: shouldn't we be setting both transform and GT_transform?
+            # to remind - the transformation is just converting it to tensors
+            transform=testTransform
+        )
+        
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
     elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
@@ -422,6 +446,8 @@ def main(params, args):
 
     trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
     testF = open(os.path.join(resultDir, 'test.csv'), 'w')
+
+    print(torch.cuda.is_available())
 
     for epoch in range(1, epochs+1):
         # not working from epoch = 2 and so on. why??? By Chao.
