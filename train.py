@@ -22,11 +22,12 @@ import utils as utils
 
 import vnet
 import DataManager as DM
-import DicomManager as Dim
+import DicomManager as DCM
 
 import customDataset
 # import make_graph
 
+iteration_dice_average = 0
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -49,6 +50,8 @@ def save_checkpoint(state, path, prefix, filename='checkpoint.pth.tar'):
 def train_test_split(images, labels, test_proportion):
     # images and labels are both dict().
     # pdb.set_trace()
+    # NOTE: '_segmentation' appended to file name is only true for promise12
+    # but because only promise12 needs train_test split, not nci - no need to change
     keys = list(images.keys())
     size = len(keys)
     test_keys = sample(keys, int(test_proportion*size))
@@ -65,6 +68,7 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
     nr_iter = args.numIterations  # params['ModelParams']['numIterations']
     batchsize = args.batchsize  # params['ModelParams']['batchsize']
+    task = params['ModelParams']['task']
 
     # pdb.set_trace()
     keysIMG = list(numpyImages.keys())
@@ -81,7 +85,14 @@ def dataAugmentation(params, args, dataQueue, numpyImages, numpyGT):
 
         currImgKey = keysIMG[whichData]
         # require customization. This is for PROMISE12 data.
-        currGtKey = keysIMG[whichData] + '_segmentation'
+        
+        if task == 'nci-isbi-2013'
+            # NOTE: the training set labels for promise12 have same name as the actual file
+            # + _truth is for test set
+            currGtKey = keysIMG[whichData]
+        else:
+            currGtKey = keysIMG[whichData] + '_segmentation'
+
         # print("keysIMG type:{}\nkeysIMG:{}".format(type(keysIMG),str(keysIMG)))
         # print("whichData:{}".format(whichData))
         # pdb.set_trace()
@@ -121,9 +132,13 @@ def adjust_opt(optAlg, optimizer, iteration):
 
 
 def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
+    global iteration_dice_average
+
     model.train()
     nProcessed = 0
     batch_size = len(trainLoader.dataset)
+
+    
     for batch_idx, output in enumerate(trainLoader):
         # data shape [batch_size, channels, z, y, x], output shape [batch_size, z, y, x]
         data, target = output
@@ -144,11 +159,16 @@ def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
         nProcessed += len(data)
         # loss.data[0] is sum of dice coefficient over a mini-batch. By Chao.
         diceOvBatch = loss.data[0]/batch_size
+        iteration_dice_average += diceOvBatch
         err = 100.*(1. - diceOvBatch)
 
-    if np.mod(iteration, 10) == 0:
-        print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
-            epoch, iteration, diceOvBatch, err))
+    num_it_average = 10
+    if np.mod(iteration, num_it_average) == 0:
+        iteration_dice_average /= num_it_average
+        print(f'\nFor trainning: epoch: {epoch} iteration: {iteration} \tdice_coefficient over last {num_it_average} : {iteration_dice_average:.4f}\n')
+        iteration_dice_average = 0
+        # print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
+        #     epoch, iteration, diceOvBatch, err))
 
     return diceOvBatch, err
 
@@ -250,14 +270,18 @@ def main(params, args):
     epochs = args.nEpochs
     nr_iter = args.numIterations  # params['ModelParams']['numIterations']
     batch_size = args.batchsize  # params['ModelParams']['batchsize']
+    task = params['ModelParams']['task']
 
     # for every run, a folder is created and this is how it gets its name
     resultDir = 'results/vnet.base.{}.{}'.format(
-        params['ModelParams']['task'], datestr())
+        task, datestr())
 
+
+    # https://becominghuman.ai/this-thing-called-weight-decay-a7cd4bcfccab
     weight_decay = args.weight_decay
-    
+
     # https://pypi.org/project/setproctitle/
+    # The setproctitle module allows a process to change its title (as displayed by system tools such as ps and top).
     # set title of the current process
     setproctitle.setproctitle(resultDir)
 
@@ -268,12 +292,16 @@ def main(params, args):
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
 
+    # https://discuss.pytorch.org/t/what-is-manual-seed/5939/4
+    # You just need to call torch.manual_seed(seed), and it will set the seed of the random number generator to a fixed value,
+    # so that when you call for example torch.rand(2), the results will be reproducible.
     torch.manual_seed(args.seed)
     if args.cuda:
         torch.cuda.manual_seed(args.seed)
 
     print("build vnet")
     model = vnet.VNet(elu=False, nll=False)
+    
     gpu_ids = args.gpu_ids
     # torch.cuda.set_device(gpu_ids) # why do I have to add this line? It seems the below line is useless to apply GPU devices. By Chao.
     # model = nn.parallel.DataParallel(model, device_ids=[gpu_ids])
@@ -287,12 +315,16 @@ def main(params, args):
             checkpoint = torch.load(args.resume)
             args.start_epoch = checkpoint['epoch']
             best_prec1 = checkpoint['best_prec1']
+            
+            # A state_dict is simply a Python dictionary object that maps each layer to its parameter tensor.
             model.load_state_dict(checkpoint['state_dict'])
             print("=> loaded checkpoint '{}' (epoch {})"
                   .format(args.evaluate, checkpoint['epoch']))
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
     else:
+
+        # https://stackoverflow.com/questions/49433936/how-to-initialize-weights-in-pytorch
         # https://discuss.pytorch.org/t/parameters-initialisation/20001
         model.apply(weights_init)
 
@@ -332,9 +364,10 @@ def main(params, args):
         'normDir': params['DataManagerParams']['normDir']
     }
 
-    # Need the dicom dataloader
-    if params['ModelParams']['task'] == 'ISBI2013':
-        DM = Dim
+
+    # NOTE: Change the data manager according to task at hand
+    if task == 'nci-isbi-2013':
+        DM = DCM
 
     # if exists, means test files are given.
     if params['ModelParams']['dirTestImage']:
@@ -355,8 +388,20 @@ def main(params, args):
         test_images = dataManagerTest.getNumpyImages()
         test_labels = dataManagerTest.getNumpyGT()
 
+        
         testSet = customDataset.customDataset(
-            mode='test', images=test_images, GT=test_labels, transform=testTransform)
+            mode='test',
+            images=test_images,
+            GT=test_labels,
+
+            task=task,
+            
+            # testTransform is using pytorch transform, just to convert ndarray to a tensor
+            # REVIEW: shouldn't we be setting both transform and GT_transform?
+            # to remind - the transformation is just converting it to tensors
+            transform=testTransform
+        )
+        
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
     elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
@@ -373,7 +418,7 @@ def main(params, args):
         train_images, train_labels, test_images, test_labels = train_test_split(
             numpyImages, numpyGT, args.testProp)
         testSet = customDataset.customDataset(
-            mode='test', images=test_images, GT=test_labels, transform=testTransform)
+            mode='test', images=test_images, task=task, GT=test_labels, transform=testTransform)
         testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
 
     else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
@@ -418,6 +463,8 @@ def main(params, args):
     trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
     testF = open(os.path.join(resultDir, 'test.csv'), 'w')
 
+    print(torch.cuda.is_available())
+
     for epoch in range(1, epochs+1):
         # not working from epoch = 2 and so on. why??? By Chao.
         dataQueue_tmp = dataQueue
@@ -438,6 +485,7 @@ def main(params, args):
                     defLab > 0.5).astype(dtype=np.float32)
 
             trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
+                                                   task=task,
                                                    transform=trainTransform)
             trainLoader = DataLoader(
                 trainSet, batch_size=batch_size, shuffle=True, **kwargs)
@@ -482,7 +530,7 @@ def main(params, args):
         numpyImages = dataManagerInfer.getNumpyImages()
 
         inferSet = customDataset.customDataset(
-            mode='infer', images=numpyImages, GT=None, transform=testTransform)
+            mode='infer', images=numpyImages, task=task, GT=None, transform=testTransform)
         inferLoader = DataLoader(
             inferSet, batch_size=1, shuffle=True, **kwargs)
         inference(dataManagerInfer, args, inferLoader, model, resultDir)

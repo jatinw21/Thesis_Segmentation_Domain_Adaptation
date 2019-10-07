@@ -5,6 +5,9 @@ from os.path import isfile, join, splitext
 import numpy as np
 import SimpleITK as sitk
 
+# NOTE: Remove later
+from sys import exit
+
 # What is isotropical scaling? https://stackoverflow.com/questions/43577231/what-is-anisotropic-scaling-in-computer-vision
 # dataset isotropically scaled to 1x1x1.5mm, volume resized to 128x128x64
 # The datasets were first normalised using the N4 bias filed correction function of the ANTs framework

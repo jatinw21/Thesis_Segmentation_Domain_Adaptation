@@ -78,7 +78,7 @@ class DiceLoss(Function):
             # the target volume can be empty - so we still want to
             # end up with a score of 1 if the result is 0/0
             dice[i] = 2*self.intersect[i] / (self.union[i] + eps)
-            print('union: {}\t intersect: {}\t dice_coefficient: {:.7f}'.format(str(self.union[i]), str(self.intersect[i]), dice[i])) # target_sum: {:.0f} pred_sum: {:.0f}; target_sum, result_sum,
+            # print('union: {}\t intersect: {}\t dice_coefficient: {:.7f}'.format(str(self.union[i]), str(self.intersect[i]), dice[i])) # target_sum: {:.0f} pred_sum: {:.0f}; target_sum, result_sum,
 
             # intersect = torch.dot(result, target)
             # # binary values so sum the same as sum of squares
