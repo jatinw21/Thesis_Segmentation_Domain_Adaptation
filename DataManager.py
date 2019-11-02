@@ -36,13 +36,13 @@ class DataManager(object):
         '''Training images list'''
         self.imageFileList = [f for f in listdir(self.imageFolder) if isfile(join(
             self.imageFolder, f)) and '.DS_Store' not in f and '._' not in f and '.raw' not in f]
-        print('imageFileList: ' + str(self.imageFileList))
+        # print('imageFileList: ' + str(self.imageFileList))
 
     def createGTFileList(self):
         '''Training images segmentation (labels) list'''
         self.GTFileList = [f for f in listdir(self.GTFolder) if isfile(
             join(self.GTFolder, f)) and '.DS_Store' not in f and '._' not in f and '.raw' not in f]
-        print('GTFileList: ' + str(self.GTFileList))
+        # print('GTFileList: ' + str(self.GTFileList))
 
     def loadImages(self):
         self.sitkImages = dict()

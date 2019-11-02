@@ -7,7 +7,9 @@ import argparse
 import numpy as np
 
 import train
+import train_DA
 
+# NOTE: update this
 TEST = True
 if TEST:
     iterations = 2
@@ -135,8 +137,8 @@ args = parser.parse_args()
 
 #  load dataset, train, test(i.e. output predicted mask for test data in .mhd)
 # NOTE: Uncomment later
-train.main(params, args)
-
+# train.main(params, args)
+train_DA.main(params, args)
 
 # NOTE: TESTING AREA
 

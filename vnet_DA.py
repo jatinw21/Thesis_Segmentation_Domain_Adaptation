@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from functions import ReverseLayerF
 
 import pdb
 
@@ -155,29 +156,24 @@ class VNet(nn.Module):
         self.down_tr64 = DownTransition(32, 2, elu)
         self.down_tr128 = DownTransition(64, 3, elu, dropout=True)
         self.down_tr256 = DownTransition(128, 2, elu, dropout=True)
+
         self.up_tr256 = UpTransition(256, 256, 2, elu, dropout=True)
         self.up_tr128 = UpTransition(256, 128, 2, elu, dropout=True)
         self.up_tr64 = UpTransition(128, 64, 1, elu)
         self.up_tr32 = UpTransition(64, 32, 1, elu)
         self.out_tr = OutputTransition(32, elu, nll)
 
-    # The network topology as described in the diagram
-    # in the VNet paper
-    # def __init__(self):
-    #     super(VNet, self).__init__()
-    #     self.in_tr =  InputTransition(16)
-    #     # the number of convolutions in each layer corresponds
-    #     # to what is in the actual prototxt, not the intent
-    #     self.down_tr32 = DownTransition(16, 2)
-    #     self.down_tr64 = DownTransition(32, 3)
-    #     self.down_tr128 = DownTransition(64, 3)
-    #     self.down_tr256 = DownTransition(128, 3)
-    #     self.up_tr256 = UpTransition(256, 3)
-    #     self.up_tr128 = UpTransition(128, 3)
-    #     self.up_tr64 = UpTransition(64, 2)
-    #     self.up_tr32 = UpTransition(32, 1)
-    #     self.out_tr = OutputTransition(16)
-    def forward(self, x):
+
+
+        self.domain_classifier = nn.Sequential()
+        self.domain_classifier.add_module('d_fc1', nn.Linear(256 * 4 * 4 * 8, 256))
+        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(256))
+        self.domain_classifier.add_module('d_relu1', nn.ReLU(True))
+        self.domain_classifier.add_module('d_fc2', nn.Linear(256, 100))
+        self.domain_classifier.add_module('d_softmax', nn.LogSoftmax(dim=1))
+
+    
+    def forward(self, x, alpha):
         # print("x before model shape:"+str(x.shape))
         out16 = self.in_tr(x)
         out32 = self.down_tr32(out16)
@@ -189,6 +185,11 @@ class VNet(nn.Module):
         # print("out128(down_tr128) shape:"+str(out128.shape))
         out256 = self.down_tr256(out128)
         # print("out256(down_tr256) shape:"+str(out256.shape))
+
+        feature = out256.view(-1, 256 * 4 * 4 * 8)
+        reverse_feature = ReverseLayerF.apply(feature, alpha)
+        domain_output = self.domain_classifier(reverse_feature)
+
         out = self.up_tr256(out256, out128)
         # print("up_tr256 shape:"+str(out.shape))
         out = self.up_tr128(out, out64)
@@ -198,8 +199,5 @@ class VNet(nn.Module):
         out = self.up_tr32(out, out16)
         # print("up_tr32 shape:"+str(out.shape))
         out = self.out_tr(out)
-        # [1, 2, 1048576]
-        # I think 1 is the batch_size, 2 is the number of channels as mentioned in the
-        # Vnet paper. and 1048576 is 128*128*64, which is the output size from the image
         # print("out_tr shape:"+str(out.shape))
-        return out
+        return out, domain_output

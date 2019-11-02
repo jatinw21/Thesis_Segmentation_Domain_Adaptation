@@ -10,3 +10,6 @@ dataset/.DS_Store
 dataset/imagesTr/.DS_Store
 dataset/imagesTs/.DS_Store
 dataset/labelsTr/.DS_Store
+DANN_py3
+DANN_segmentation
+pytorch-domain-adaptation
