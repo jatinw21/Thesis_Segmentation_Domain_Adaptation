@@ -166,10 +166,12 @@ class VNet(nn.Module):
 
 
         self.domain_classifier = nn.Sequential()
-        self.domain_classifier.add_module('d_fc1', nn.Linear(256 * 4 * 4 * 8, 256))
-        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(256))
-        self.domain_classifier.add_module('d_relu1', nn.ReLU(True))
-        self.domain_classifier.add_module('d_fc2', nn.Linear(256, 100))
+        self.domain_classifier.add_module('d_fc1', nn.Linear(256 * 4 * 4 * 8, 512))
+        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(512))
+        # self.domain_classifier.add_module('d_relu1', nn.ReLU(True))
+        self.domain_classifier.add_module('d_fc2', nn.Linear(512, 64))
+        self.domain_classifier.add_module('d_bn2', nn.BatchNorm1d(64))
+        self.domain_classifier.add_module('d_fc3', nn.Linear(64, 2))
         self.domain_classifier.add_module('d_softmax', nn.LogSoftmax(dim=1))
 
     

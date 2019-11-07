@@ -29,6 +29,7 @@ import customDataset
 
 ### NEW ###
 import random
+from sys import exit
 # import torch.backends.cudnn as cudnn
 
 source_dataset_name = 'promise12'
@@ -37,6 +38,7 @@ source_image_root = os.path.join('dataset')
 target_image_root = os.path.join('dataset_nci')
 model_root = 'models'
 cuda = True
+basePath = os.getcwd()
 # cudnn.benchmark = True
 
 # NOTE: review these below - They're all set in main for us, not here
@@ -49,6 +51,7 @@ cuda = True
 ### NEW ###
 
 iteration_dice_average = 0
+iteration_err_average = 0
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -189,15 +192,231 @@ def train_dice(args, epoch, iteration, model, trainLoader, optimizer, trainF):
     num_it_average = 10
     if np.mod(iteration, num_it_average) == 0:
         iteration_dice_average /= num_it_average
-        print(f'\nFor trainning: epoch: {epoch} iteration: {iteration} \tdice_coefficient over last {num_it_average} : {iteration_dice_average:.4f}\n')
+        print(f'\nFor training: epoch: {epoch} iteration: {iteration} \tdice_coefficient over last {num_it_average} : {iteration_dice_average:.4f}\n')
         iteration_dice_average = 0
         # print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
         #     epoch, iteration, diceOvBatch, err))
 
     return diceOvBatch, err
 
+def train_dice_DA(args, epoch, iteration, model, trainLoader, optimizer, trainF, trainLoader_target, nr_iter):
+    global iteration_dice_average
+    global iteration_err_average
+
+    loss_domain = torch.nn.NLLLoss()
+
+    model.train()
+    nProcessed = 0
+
+    len_dataloader = min(len(trainLoader), len(trainLoader_target))
+    data_source_iter = iter(trainLoader)
+    data_target_iter = iter(trainLoader_target)
+
+    batch_size = len(trainLoader.dataset)
+    
+    # print('Lengths of trainloader source and target', len(trainLoader), len(trainLoader_target)) # 1 1
+    # print('Length of dataloader (min)', len_dataloader) # 1
+    # print('batch size', batch_size) # 2
+
+    i = 0
+
+    while i < len_dataloader:
+        # NOTE: changing epoch to iteration in the formula below,
+        # because for this epoch is always 1, but iteration is what changes
+        # REVIEW: this formula with iteration now
+        p = float(i + iteration * len_dataloader) / (nr_iter) / len_dataloader
+        alpha = 2. / (1. + np.exp(-10 * p)) - 1
+        # print(alpha)
+
+        # print(p) # 0.5
+        # print(alpha) # 0.9866142981514305 for nr_ier = 2 while testing
+        
+        # BUG: remove later
+        # nr_iter = 30000
+        # p = float(i + iteration * len_dataloader) / nr_iter / len_dataloader
+        # alpha = 2. / (1. + np.exp(-10 * p)) - 1
+
+        # print(p) # 3.3333333333333335e-05
+        # print(alpha) # 0.0001666666651234383
+        # NOTE: seems like alpha starts off really small and then gets bigger
+        # Not sure how that really works
+
+        
+    
+
+    
+    # for batch_idx, output in enumerate(trainLoader):
+    #     # NOTE: placeholder for alpha
+    #     alpha = 0.001
+
+        # data shape [batch_size, channels, z, y, x], output shape [batch_size, z, y, x]
+        # data, target = output
+        data, target = data_source_iter.next()
+        domain_label = torch.zeros(batch_size)
+        domain_label = domain_label.long()
+
+        # NOTE: why is there an extra 1 dimension below for data??
+        # print(data.shape) # torch.Size([2, 1, 64, 128, 128])
+        # print(target.shape) # torch.Size([2, 64, 128, 128])
+        # print(domain_label.shape) # torch.Size([2])
+        # print(domain_label) # tensor([0, 0])
+
+        
+        # batch_size = len(target)
+        # pdb.set_trace()
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+            domain_label = domain_label.cuda()
+            loss_domain = loss_domain.cuda()
+
+        data = Variable(data)
+        target = Variable(target)
+        # data, target = Variable(data), Variable(target)
+        optimizer.zero_grad()
+        output, domain_output = model(data, alpha)  # output shape[batch_size, 2, z*y*x]
+        # print('domain_output', domain_output)
+
+        # print(output.shape) # torch.Size([2, 2, 1048576])
+        # print(domain_output.shape) # torch.Size([4, 2])
+        # print(domain_output) # tensor([[-0.9123, -0.5135],
+        # [-0.5528, -0.8565],
+        # [-0.9123, -0.5135],
+        # [-0.5528, -0.8565]], device='cuda:0', grad_fn=<GatherBackward>)
+
+
+        # print("data shape:{}\noutput shape:{}\ntarget shape:{}".format(data.shape, output.shape, target.shape))
+        loss = lossFuncs.dice_loss(output, target)
+        # make_graph.make_dot(os.path.join(resultDir, 'promise_net_graph.dot'), loss)
+        loss.backward(retain_graph=True)
+        
+        # print(type(loss)) # <class 'torch.Tensor'>
+        # print(loss.shape) # torch.Size([1])
+        # print(loss) # tensor([0.1000], device='cuda:0', grad_fn=<DiceLoss>)
+        # NOTE: need to split it in half because there is repitition
+        domain_output = domain_output.split((2))[0]
+        err_s_domain = loss_domain(domain_output, domain_label)
+
+        # print(err_s_domain)
+
+        # NOTE: training model using target data
+        data_target = data_target_iter.next()
+        t_img, _ = data_target
+        
+        # batch_size = len(t_img)
+        domain_label = torch.ones(batch_size)
+        domain_label = domain_label.long()
+        # batch_size = len(target)
+        # pdb.set_trace()
+        if args.cuda:
+            t_img = t_img.cuda()
+            domain_label = domain_label.cuda()
+
+        t_img = Variable(t_img)
+        _, domain_output = model(t_img, alpha)
+        # print('domain_output', domain_output)
+
+        # NOTE: need to split it in half because there is repitition
+        domain_output = domain_output.split((2))[0]
+        # https://stackoverflow.com/questions/53994625/how-can-i-process-multi-loss-in-pytorch
+        err_t_domain = loss_domain(domain_output, domain_label)
+        
+        err = err_t_domain + err_s_domain
+        err.backward()
+        # print(err_t_domain.item(), err_s_domain.item())
+        # print(err)
+        
+        optimizer.step()
+
+        # print(loss.data[0])
+        # print(err)
+        # print(err.data)
+        
+
+        
+        nProcessed += len(data)
+        
+        # loss.data[0] is sum of dice coefficient over a mini-batch. By Chao.
+        diceOvBatch = loss.data[0]/batch_size
+        errOvBatch = err.item()/batch_size
+        iteration_dice_average += diceOvBatch
+        iteration_err_average += errOvBatch
+        # NOTE: This was just diceOvBatch compleemnt and with %age. Now it's the real full error
+        # err = 100.*(1. - diceOvBatch)
+        i += 1
+
+    num_it_average = 10
+    if np.mod(iteration, num_it_average) == 0:
+        iteration_dice_average /= num_it_average
+        iteration_err_average /= num_it_average
+        print(f'\nFor trainning: epoch: {epoch} iteration: {iteration} \tdice_coefficient over last {num_it_average} : {iteration_dice_average:.4f} and DA error : {iteration_err_average:.4f}')
+        iteration_dice_average = 0
+        iteration_err_average = 0
+        # print('\nFor trainning: epoch: {} iteration: {} \tdice_coefficient over batch: {:.4f}\tError: {:.4f}\n'.format(
+        #     epoch, iteration, diceOvBatch, err))
+
+    return diceOvBatch, errOvBatch
 
 def test_dice(dataManager, args, epoch, model, testLoader, testF, resultDir):
+    '''
+    :param dataManager: contains self.sitkImages which is a dict of test sitk images or all sitk images including test sitk images.
+    :param args:
+    :param epoch:
+    :param model:
+    :param testLoader:
+    :param testF: path to file recording test results.
+    :return:
+    '''
+    model.eval()
+    test_dice = 0
+    incorrect = 0
+    # assume single GPU/batch_size =1
+    # pdb.set_trace()
+    for batch_idx, data in enumerate(testLoader):
+        # NOTE: placeholder for alpha
+        alpha = 0.001
+
+        data, target, id = data
+        # print("testing with {}".format(id[0]))
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        data = Variable(data)
+        target = Variable(target)
+        output, domain_output = model(data, alpha)
+        dice = lossFuncs.dice_loss(output, target).data[0]
+        test_dice += dice
+        incorrect += (1. - dice)
+
+        # pdb.set_trace()
+        _, _, z, y, x = data.shape  # need to squeeze to shape of 3-d. by Chao.
+        output = output[0, ...]  # assume batch_size = 1
+        _, output = output.max(0)
+        output = output.view(z, y, x)
+        output = output.cpu()
+        # In numpy, an array is indexed in the opposite order (z,y,x)  while sitk will generate the sitk image in (x,y,z). (refer: http://insightsoftwareconsortium.github.io/SimpleITK-Notebooks/Python_html/01_Image_Basics.html)
+        output = output.numpy()
+        # change to simpleITK order (x, y, z)
+        output = np.transpose(output, [2, 1, 0])
+        # pdb.set_trace()
+        print("save predicted label for test{}".format(id[0]))
+        dataManager.writeResultsFromNumpyLabel(output, id[0], '_tested_epoch{}'.format(
+            epoch), '.mhd', resultDir)  # require customization
+        testF.write('{},{},{},{}\n'.format(epoch, id[0], dice, 1-dice))
+
+    nTotal = len(testLoader)
+    test_dice /= nTotal  # loss function already averages over batch size
+    err = 100.*incorrect/nTotal
+    # if np.mod(iteration, 10) == 0:
+    #     print('\nFor testing: iteration:{}\tAverage Dice Coeff: {:.4f}\tError:{:.4f}\n'.format(iteration, test_dice, err))
+
+    #### added later ##### - Jatin
+    print('\nFor testing: Average Dice Coeff: {:.4f}\tError:{:.4f}\n'.format(
+        test_dice, err))
+    #### added later #####
+
+    # testF.write('{},{},{}\n'.format('avarage', test_dice, err))
+    testF.flush()
+
+def test_dice_DA(dataManager, args, epoch, model, testLoader, testF, resultDir):
     '''
     :param dataManager: contains self.sitkImages which is a dict of test sitk images or all sitk images including test sitk images.
     :param args:
@@ -369,7 +588,7 @@ def main(params, args):
             # https://discuss.pytorch.org/t/parameters-initialisation/20001
             model.apply(weights_init)
 
-        train = train_dice
+        train = train_dice_DA
         test = test_dice
 
         print('  + Number of params: {}'.format(sum([p.data.nelement() for p in model.parameters()])))
@@ -398,77 +617,54 @@ def main(params, args):
             'normDir': params['DataManagerParams']['normDir']
         }
 
-        # if exists, means test files are given.
-        if params['ModelParams']['dirTestImage']:
-            print("\nloading training set")
-            dataManagerTrain = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                            params['ModelParams']['dirTrainLabel'],
-                                            params['ModelParams']['dirResult'],
-                                            DataManagerParams)
-            dataManagerTrain.loadTrainingData()  # required
-            train_images = dataManagerTrain.getNumpyImages()
-            train_labels = dataManagerTrain.getNumpyGT()
-
-            print("\nloading test set")
-            dataManagerTest = DM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
-                                            params['ModelParams']['dirResult'],
-                                            DataManagerParams)
-            dataManagerTest.loadTestingData()  # required
-            test_images = dataManagerTest.getNumpyImages()
-            test_labels = dataManagerTest.getNumpyGT()
-
-            
-            testSet = customDataset.customDataset(
-                mode='test',
-                images=test_images,
-                GT=test_labels,
-
-                task=task,
-                
-                # test_transform_source is using pytorch transform, just to convert ndarray to a tensor
-                # REVIEW: shouldn't we be setting both transform and GT_transform?
-                # to remind - the transformation is just converting it to tensors
-                transform=test_transform_source
-            )
-            
-            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
-
-        elif args.testProp:  # if 'dirTestImage' is not given but 'testProp' is given, means only one data set is given. need to perform train_test_split.
-            print('\n loading dataset, will split into train and test')
-            dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                        params['ModelParams']['dirTrainLabel'],
+        # NOTE: We need to get the training data managers for both and test for the promise12 one
+    
+        # NOTE: This is for the nci dataset, that will be used as target. We just need training images without labels
+        dataManagerTrain = DCM.DataManager(os.path.join(basePath,'dataset_nci/imagesTr'),
+                                        os.path.join(basePath,'dataset_nci/labelsTr'),
                                         params['ModelParams']['dirResult'],
                                         DataManagerParams)
-            dataManager.loadTrainingData()  # required
-            numpyImages = dataManager.getNumpyImages()
-            numpyGT = dataManager.getNumpyGT()
-            # pdb.set_trace()
+        dataManagerTrain.loadTrainingData()  # required
+        target_images = dataManagerTrain.getNumpyImages()
+        target_labels = dataManagerTrain.getNumpyGT()
 
-            train_images, train_labels, test_images, test_labels = train_test_split(
-                numpyImages, numpyGT, args.testProp)
-            testSet = customDataset.customDataset(
-                mode='test', images=test_images, task=task, GT=test_labels, transform=test_transform_source)
-            testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
+        # print(len(target_images)) # 60
+        # print(len(target_labels)) # 60
+        # print(type(target_images['Prostate3T-01-0022'])) # <class 'numpy.ndarray'>
+        # print(target_images['Prostate3T-01-0022'].shape) # (128, 128, 64)
+        # print(target_labels['Prostate3T-01-0022'].shape) # (128, 128, 64)
 
-        else:  # if both 'dirTestImage' and 'testProp' are not given, means the only one dataset provided is used as train set.
-            print('\n loading only train dataset')
-            dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
-                                        params['ModelParams']['dirTrainLabel'],
-                                        params['ModelParams']['dirResult'],
-                                        DataManagerParams)
-            dataManager.loadTrainingData()  # required
-            train_images = dataManager.getNumpyImages()
-            train_labels = dataManager.getNumpyGT()
 
-            test_images = None
-            test_labels = None
-            testSet = None
-            testLoader = None
+        # NOTE: This is the promise12 dataset. We need both train and test for them.
+        # We'll get all 50 images that we have labels for and then do train/test split
+        dataManager = DM.DataManager(params['ModelParams']['dirTrainImage'],
+                                    params['ModelParams']['dirTrainLabel'],
+                                    params['ModelParams']['dirResult'],
+                                    DataManagerParams)
+        dataManager.loadTrainingData()  # required
+        source_images = dataManager.getNumpyImages()
+        source_labels = dataManager.getNumpyGT()
+        # pdb.set_trace()
 
-        if params['ModelParams']['dirTestImage']:
-            dataManager_toTestFunc = dataManagerTest
-        else:
-            dataManager_toTestFunc = dataManager
+        # print(len(source_images)) # 50
+        # print(len(source_labels)) # 50
+        # print(type(source_images['Case00'])) # <class 'numpy.ndarray'>
+        # print(source_images['Case00'].shape) # (128, 128, 64)
+        # print(source_labels['Case00_segmentation'].shape) # (128, 128, 64)
+
+
+        train_images, train_labels, test_images, test_labels = train_test_split(source_images, source_labels, args.testProp)
+        testSet = customDataset.customDataset(
+            mode='test', images=test_images, task=task, GT=test_labels, transform=test_transform_source
+        )
+        testLoader = DataLoader(testSet, batch_size=1, shuffle=True, **kwargs)
+
+        # print(type(testLoader)) # <class 'torch.utils.data.dataloader.DataLoader'>
+        # print(len(testLoader)) # 10
+        # print(type(train_images)) # <class 'dict'>
+        # print(len(train_images)) # 40
+
+        dataManager_toTestFunc = dataManager
 
         ### For train_images and train_labels, starting data augmentation and loading augmented data with multiprocessing
         dataQueue = Queue(30)  # max 30 images in queue?
@@ -489,16 +685,42 @@ def main(params, args):
                             DataManagerParams['VolSize'][1],
                             DataManagerParams['VolSize'][2]), dtype=float)
 
+
+        ### For train_images and train_labels, starting data augmentation and loading augmented data with multiprocessing
+        dataQueue_target = Queue(30)  # max 30 images in queue?
+        dataPreparation_target = [None] * params['ModelParams']['nProc']
+
+        # NOTE: same, but for target -> processes creation
+        for proc in range(0, params['ModelParams']['nProc']):
+            # the dataAugmentation processes put the augmented training images in the dataQueue
+            dataPreparation_target[proc] = Process(target=dataAugmentation,
+                                            args=(params, args, dataQueue_target, source_images, source_labels))
+            dataPreparation_target[proc].daemon = True
+            dataPreparation_target[proc].start()
+
+        batchData_target = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
+        batchLabel_target = np.zeros((batch_size, DataManagerParams['VolSize'][0],
+                            DataManagerParams['VolSize'][1],
+                            DataManagerParams['VolSize'][2]), dtype=float)
+        
+
         trainF = open(os.path.join(resultDir, 'train.csv'), 'w')
         testF = open(os.path.join(resultDir, 'test.csv'), 'w')
 
-        print(torch.cuda.is_available())
+        print('cuda available?:', torch.cuda.is_available())
+
+        print('Total epochs:', epochs)
 
         for epoch in range(1, epochs+1):
             # not working from epoch = 2 and so on. why??? By Chao.
             dataQueue_tmp = dataQueue
+            dataQueue_target_tmp = dataQueue_target
             diceOvBatch = 0
             err = 0
+
+            print(f'Startin first of total iterations ({nr_iter})')
             for iteration in range(1, nr_iter + 1):
                 # adjust_opt(args.opt, optimizer, iteration+)
                 if args.opt == 'sgd':
@@ -506,21 +728,63 @@ def main(params, args):
                         for param_group in optimizer.param_groups:
                             param_group['lr'] *= args.gamma
 
+
                 for i in range(batch_size):
+                    # print(dataQueue_tmp.qsize()) # 4, then 3 in next iter
                     [defImg, defLab] = dataQueue_tmp.get()
+                    # print(type(defImg)) # <class 'numpy.ndarray'>
+                    # print(dataQueue_tmp.qsize()) # 3, then 2 in next iter
+                    # print(defImg.shape) # (128, 128, 64)
+                    # print(defLab.shape) # (128, 128, 64)
 
                     batchData[i, :, :, :] = defImg.astype(dtype=np.float32)
                     batchLabel[i, :, :, :] = (
                         defLab > 0.5).astype(dtype=np.float32)
 
+                    # print(batchData.shape) # (2, 128, 128, 64)
+                    # print(batchLabel.shape) # (2, 128, 128, 64)
+                    
+
+                    # NOTE: same, but for target
+                    [defImg_target, defLab_target] = dataQueue_target_tmp.get()
+
+                    batchData_target[i, :, :, :] = defImg_target.astype(dtype=np.float32)
+                    batchLabel_target[i, :, :, :] = (
+                        defLab_target > 0.5).astype(dtype=np.float32)
+
+                    # print(batchData.shape) # (2, 128, 128, 64)
+                    # print(batchLabel.shape) # (2, 128, 128, 64)
+                
+
                 trainSet = customDataset.customDataset(mode='train', images=batchData, GT=batchLabel,
-                                                    task=task,
+                                                    task='promise12',
                                                     transform=train_transform_source)
                 trainLoader = DataLoader(
                     trainSet, batch_size=batch_size, shuffle=True, **kwargs)
 
+
+                # NOTE: same, but for target
+                trainSet_target = customDataset.customDataset(mode='train', images=batchData_target, GT=batchLabel_target,
+                                                    task='nci-isbi-2013',
+                                                    transform=train_transform_target)
+                trainLoader_target = DataLoader(
+                    trainSet_target, batch_size=batch_size, shuffle=True, **kwargs)
+
+                # print('Batch size:', batch_size)
+
+                # print(len(trainLoader)) # 1. NOTE: Shouldn't these be equal to 2 i.e. the batch_size
+                # probably this is 1, because it's 1 of the shape (2, 128, 128, 64). 
+                # The batchsize is already included in dim 1
+                # NOTE: found soln -> len(trainLoader.dataset) gives 2 for batch_size
+                # print(len(trainLoader_target)) # 1
+
+                
+
+                # diceOvBatch_tmp, err_tmp = train(
+                #     args, epoch, iteration, model, trainLoader, optimizer, trainF)
+
                 diceOvBatch_tmp, err_tmp = train(
-                    args, epoch, iteration, model, trainLoader, optimizer, trainF)
+                    args, epoch, iteration, model, trainLoader, optimizer, trainF, trainLoader_target, nr_iter)
 
                 if args.xLabel == 'Iteration':
                     trainF.write('{},{},{}\n'.format(
@@ -549,23 +813,23 @@ def main(params, args):
         testF.close()
 
         # inference, i.e. output predicted mask for test data
-        if params['ModelParams']['dirInferImage'] != '':
-            print("loading inference data")
-            dataManagerInfer = DM.DataManager(params['ModelParams']['dirInferImage'], None,
-                                            params['ModelParams']['dirResult'],
-                                            DataManagerParams)
-            # required.  Create .loadInferData??? by Chao.
-            dataManagerInfer.loadInferData()
-            numpyImages = dataManagerInfer.getNumpyImages()
+        # if params['ModelParams']['dirInferImage'] != '':
+        #     print("loading inference data")
+        #     dataManagerInfer = DM.DataManager(params['ModelParams']['dirInferImage'], None,
+        #                                     params['ModelParams']['dirResult'],
+        #                                     DataManagerParams)
+        #     # required.  Create .loadInferData??? by Chao.
+        #     dataManagerInfer.loadInferData()
+        #     numpyImages = dataManagerInfer.getNumpyImages()
 
-            inferSet = customDataset.customDataset(
-                mode='infer', images=numpyImages, task=task, GT=None, transform=test_transform_source)
+        #     inferSet = customDataset.customDataset(
+        #         mode='infer', images=numpyImages, task=task, GT=None, transform=test_transform_source)
 
-            inferLoader = DataLoader(inferSet, batch_size=1, shuffle=True, **kwargs)
+        #     inferLoader = DataLoader(inferSet, batch_size=1, shuffle=True, **kwargs)
 
-            inference(dataManagerInfer, args, inferLoader, model, resultDir)
+        #     inference(dataManagerInfer, args, inferLoader, model, resultDir)
     else:
-        print(f"Only running testing on the test dataset of '{params['ModelParams']['task']}' using model saved at '{args.testonly}'")
+        print(f"Only running testing on the test dataset of '{params['ModelParams']['task']}' using DA model saved at '{args.testonly}'")
 
         # BUG: Initially this will work only for the case of using trained model of promise12 on nci, because nci has a clearer test data with labels,
         # the accuracy of which would be easier to compare
@@ -590,7 +854,7 @@ def main(params, args):
             print("=> no checkpoint found at '{}'".format(args.resume))
             exit()
 
-        test = test_dice
+        test = test_dice_DA
 
         print('  + Number of params: {}'.format(
             sum([p.data.nelement() for p in model.parameters()])))
@@ -616,13 +880,13 @@ def main(params, args):
         # if exists, means test files are given.
         if params['ModelParams']['dirTestImage']:
             print("\nloading test set")
-            dataManagerTest = DM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
+            dataManagerTest = DCM.DataManager(params['ModelParams']['dirTestImage'], params['ModelParams']['dirTestLabel'],
                                             params['ModelParams']['dirResult'],
                                             DataManagerParams)
             dataManagerTest.loadTestingData()  # required
             test_images = dataManagerTest.getNumpyImages()
             test_labels = dataManagerTest.getNumpyGT()
-
+            
             
             testSet = customDataset.customDataset(
                 mode='test',

@@ -10,11 +10,11 @@ import train
 import train_DA
 
 # NOTE: update this
-TEST = True
+TEST = False
 if TEST:
-    iterations = 2
+    iterations = 10
 else:
-    iterations = 30000
+    iterations = 13500
 
 basePath = os.getcwd()
 
@@ -29,7 +29,8 @@ params['ModelParams']['sigma'] = 15 # used to produce randomly deformed images i
 # params['ModelParams']['snapshot'] = 0
 
 # NOTE: change task here
-task = params['ModelParams']['task'] = 'promise12'
+task = params['ModelParams']['task'] = 'promise12_DA'
+# task = params['ModelParams']['task'] = 'promise12'
 # task = params['ModelParams']['task'] = 'nci-isbi-2013'
 
 params['ModelParams']['dirTrainImage'] = os.path.join(basePath,'dataset/imagesTr')  # if 'dirTest' is empty, denotes 'path to a dataset that will later be split into trainSet and testSet. Otherwise, denotes just trainSet.
@@ -94,8 +95,11 @@ parser.add_argument('--batchsize', type=int, default=2)
 # 10 is set for testing. Real should be like 50,000
 parser.add_argument('--numIterations', type=int, default=iterations) # the number of iterations, used by https://github.com/faustomilletari/VNet, as only one Epoch run.
 
+# parser.add_argument('--baseLR', type=float, default=0.0001) # the learning rate, initial one
 parser.add_argument('--baseLR', type=float, default=0.0001) # the learning rate, initial one
 parser.add_argument('--momentum', type=float, default=0.99)
+# parser.add_argument('--weight_decay', '--wd', default=1e-8, type=float,
+#                     metavar='W', help='weight decay (default: 1e-8)')
 parser.add_argument('--weight_decay', '--wd', default=1e-8, type=float,
                     metavar='W', help='weight decay (default: 1e-8)')
 parser.add_argument('--stepsize', type=int, default=20000)
@@ -145,3 +149,4 @@ train_DA.main(params, args)
 # NOTE: Trained models to be used for evaluation
 # results/vnet.base.promise12.20190710_1045/vnet_epoch1_checkpoint.pth.tar
 # results/vnet.base.nci-isbi-2013.20191005_0155/vnet_epoch1_checkpoint.pth.tar
+# results/vnet.base.promise12_DA.20191105_2205/vnet_epoch1_checkpoint.pth.tar
